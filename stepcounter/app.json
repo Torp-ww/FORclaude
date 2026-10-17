@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "Шагомер",
+    "slug": "step-counter",
+    "version": "2.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.example.stepcounter",
+      "infoPlist": {
+        "UIBackgroundModes": ["location"],
+        "NSLocationWhenInUseUsageDescription": "Нужна геолокация, чтобы считать расстояние и скорость.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Нужна геолокация, чтобы считать шаги, когда экран выключен.",
+        "NSMotionUsageDescription": "Нужен доступ к движению, чтобы считать шаги."
+      }
+    },
+    "android": {
+      "package": "com.example.stepcounter",
+      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "ACCESS_BACKGROUND_LOCATION", "FOREGROUND_SERVICE", "FOREGROUND_SERVICE_LOCATION", "POST_NOTIFICATIONS", "SCHEDULE_EXACT_ALARM"]
+    },
+    "plugins": [
+      ["expo-location", { "isAndroidBackgroundLocationEnabled": true, "isAndroidForegroundServiceEnabled": true, "isIosBackgroundLocationEnabled": true }],
+      "expo-notifications",
+      "expo-task-manager",
+      ["expo-sensors", { "motionPermission": "Нужен доступ к движению, чтобы считать шаги." }]
+    ]
+  }
+}
