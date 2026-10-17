@@ -18,9 +18,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { variant: A, new_arch: false, hello: false }
-          - { variant: B, new_arch: false, hello: true }
-          - { variant: C, new_arch: true, hello: true }
+          - { variant: F, keep: "", ascii: false }
+          - { variant: G, keep: "", ascii: true }
+          - { variant: H, keep: "expo-notifications", ascii: true }
+          - { variant: I, keep: "expo-location,expo-task-manager,expo-sensors,@react-native-async-storage/async-storage,react-native-svg", ascii: true }
+          - { variant: J, keep: "expo-dev-client", ascii: true }
     defaults:
       run:
         working-directory: stepcounter
@@ -38,9 +40,22 @@ jobs:
       - name: Accept Android licenses
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
       - name: Configure variant
+        env:
+          KEEP: ${{ matrix.keep }}
+          ASCII: ${{ matrix.ascii }}
         run: |
-          node -e "const fs=require('fs');const a=JSON.parse(fs.readFileSync('app.json'));a.expo.newArchEnabled=${{ matrix.new_arch }};fs.writeFileSync('app.json',JSON.stringify(a,null,2))"
-          if [ "${{ matrix.hello }}" = "true" ]; then
+          node -e "
+          const fs=require('fs');
+          const keep=(process.env.KEEP||'').split(',').filter(Boolean);
+          const extra=['expo-notifications','expo-location','expo-task-manager','expo-sensors','expo-dev-client','react-native-svg','@react-native-async-storage/async-storage'];
+          const p=JSON.parse(fs.readFileSync('package.json'));
+          for(const e of extra) if(!keep.includes(e)) delete p.dependencies[e];
+          fs.writeFileSync('package.json',JSON.stringify(p,null,2));
+          const a=JSON.parse(fs.readFileSync('app.json'));
+          a.expo.plugins=a.expo.plugins.filter(x=>keep.includes(Array.isArray(x)?x[0]:x));
+          a.expo.newArchEnabled=false;
+          if(process.env.ASCII==='true') a.expo.name='StepCounter';
+          fs.writeFileSync('app.json',JSON.stringify(a,null,2));"
           cat > index.js <<'JS'
           import React from 'react';
           import { Text, View } from 'react-native';
@@ -51,7 +66,6 @@ jobs:
             </View>
           ));
           JS
-          fi
       - run: npm install --no-audit --no-fund
       - run: npx expo prebuild --platform android --no-install
       - name: Build release APK
