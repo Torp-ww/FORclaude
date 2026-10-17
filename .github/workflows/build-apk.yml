@@ -4,6 +4,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: build-apk
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
 jobs:
   apk:
     runs-on: ubuntu-latest
@@ -28,7 +35,15 @@ jobs:
       - name: Build release APK
         working-directory: stepcounter/android
         run: ./gradlew assembleRelease --no-daemon
+      - name: Rename APK
+        run: cp android/app/build/outputs/apk/release/app-release.apk shagomer.apk
       - uses: actions/upload-artifact@v5
         with:
           name: shagomer-apk
-          path: stepcounter/android/app/build/outputs/apk/release/app-release.apk
+          path: stepcounter/shagomer.apk
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Шагомер, сборка ${{ github.run_number }}
+          files: stepcounter/shagomer.apk
