@@ -14,6 +14,13 @@ permissions:
 jobs:
   apk:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { variant: A, new_arch: false, hello: false }
+          - { variant: B, new_arch: false, hello: true }
+          - { variant: C, new_arch: true, hello: true }
     defaults:
       run:
         working-directory: stepcounter
@@ -30,20 +37,31 @@ jobs:
           java-version: 17
       - name: Accept Android licenses
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+      - name: Configure variant
+        run: |
+          node -e "const fs=require('fs');const a=JSON.parse(fs.readFileSync('app.json'));a.expo.newArchEnabled=${{ matrix.new_arch }};fs.writeFileSync('app.json',JSON.stringify(a,null,2))"
+          if [ "${{ matrix.hello }}" = "true" ]; then
+          cat > index.js <<'JS'
+          import React from 'react';
+          import { Text, View } from 'react-native';
+          import { registerRootComponent } from 'expo';
+          registerRootComponent(() => (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0B1217' }}>
+              <Text style={{ color: '#5EEAD4', fontSize: 26 }}>Запуск работает</Text>
+            </View>
+          ));
+          JS
+          fi
       - run: npm install --no-audit --no-fund
       - run: npx expo prebuild --platform android --no-install
       - name: Build release APK
         working-directory: stepcounter/android
         run: ./gradlew assembleRelease --no-daemon
       - name: Rename APK
-        run: cp android/app/build/outputs/apk/release/app-release.apk shagomer.apk
-      - uses: actions/upload-artifact@v5
-        with:
-          name: shagomer-apk
-          path: stepcounter/shagomer.apk
+        run: cp android/app/build/outputs/apk/release/app-release.apk shagomer-${{ matrix.variant }}.apk
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.run_number }}
-          name: Шагомер, сборка ${{ github.run_number }}
-          files: stepcounter/shagomer.apk
+          tag_name: build-${{ github.run_number }}-${{ matrix.variant }}
+          name: Шагомер, сборка ${{ github.run_number }}, вариант ${{ matrix.variant }}
+          files: stepcounter/shagomer-${{ matrix.variant }}.apk
