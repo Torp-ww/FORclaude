@@ -166,16 +166,16 @@ function Walk({ profile }) {
       </ScrollView>
       <View style={s.footer}>
         {!session && <Btn text="Старт" onPress={start} />}
-        {active && !paused && (<View style={s.btnRow}><Btn text="Пауза" color={C.warn} onPress={pause} /><Btn text="Стоп" color={C.stop} onPress={stop} /></View>)}
-        {paused && (<View style={s.btnRow}><Btn text="Продолжить" onPress={resume} /><Btn text="Стоп" color={C.stop} onPress={stop} /></View>)}
+        {active && !paused && (<View style={s.btnRow}><Btn grow text="Пауза" color={C.warn} onPress={pause} /><Btn grow text="Стоп" color={C.stop} onPress={stop} /></View>)}
+        {paused && (<View style={s.btnRow}><Btn grow text="Продолжить" onPress={resume} /><Btn grow text="Стоп" color={C.stop} onPress={stop} /></View>)}
         {session && !active && <Btn text="Готово" onPress={reset} />}
       </View>
     </View>
   );
 }
 
-function Btn({ text, onPress, color = C.acc }) {
-  return <Pressable onPress={onPress} style={[s.btn, { backgroundColor: color }]}><Text style={s.btnText}>{text}</Text></Pressable>;
+function Btn({ text, onPress, color = C.acc, grow }) {
+  return <Pressable onPress={onPress} style={[s.btn, grow && { flex: 1 }, { backgroundColor: color }]}><Text style={s.btnText}>{text}</Text></Pressable>;
 }
 
 function History() {
@@ -328,7 +328,7 @@ const s = StyleSheet.create({
   emptyText: { color: C.dim, fontSize: 17, lineHeight: 25 },
   footer: { padding: 16, borderTopWidth: 1, borderTopColor: C.line },
   btnRow: { flexDirection: 'row', gap: 12 },
-  btn: { flex: 1, borderRadius: 16, paddingVertical: 18, alignItems: 'center', marginTop: 4 },
+  btn: { borderRadius: 16, paddingVertical: 18, alignItems: 'center', marginTop: 4 },
   btnText: { color: '#06201C', fontSize: 19, fontWeight: '800' },
   tabs: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: C.line, paddingBottom: 6 },
   tab: { flex: 1, alignItems: 'center', paddingTop: 12, gap: 6 },
