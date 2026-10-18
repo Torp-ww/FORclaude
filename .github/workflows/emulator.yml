@@ -1,0 +1,59 @@
+name: Emulator test
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/emulator.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: F, url: "https://github.com/Torp-ww/FORclaude/releases/download/build-6-F/shagomer-F.apk" }
+          - { name: A, url: "https://github.com/Torp-ww/FORclaude/releases/download/build-5-A/shagomer-A.apk" }
+    steps:
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Download APK
+        run: curl -sSL -o app.apk "${{ matrix.url }}" && ls -la app.apk
+      - name: Run in emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: |
+            adb install -r app.apk
+            adb logcat -c
+            adb shell monkey -p com.example.stepcounter -c android.intent.category.LAUNCHER 1
+            sleep 20
+            adb logcat -d > logcat-full.txt
+            adb shell pidof com.example.stepcounter > pid.txt || echo none > pid.txt
+            adb exec-out screencap -p > screen.png
+            grep -E "FATAL|AndroidRuntime|stepcounter|SoLoader|ReactNative|Hermes|UnsatisfiedLink|ClassNotFound|NoSuchMethod|Exception" logcat-full.txt | head -300 > crash-${{ matrix.name }}.txt || true
+            mv logcat-full.txt logcat-${{ matrix.name }}.txt
+            mv screen.png screen-${{ matrix.name }}.png
+            mv pid.txt pid-${{ matrix.name }}.txt
+      - name: Publish results
+        if: always()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: emu-${{ github.run_number }}-${{ matrix.name }}
+          name: Эмулятор ${{ github.run_number }}, вариант ${{ matrix.name }}
+          files: |
+            crash-${{ matrix.name }}.txt
+            logcat-${{ matrix.name }}.txt
+            screen-${{ matrix.name }}.png
+            pid-${{ matrix.name }}.txt
