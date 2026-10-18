@@ -2,11 +2,20 @@
   "name": "step-counter",
   "version": "2.0.0",
   "main": "index.js",
-  "scripts": { "start": "expo start --dev-client", "android": "expo run:android", "ios": "expo run:ios", "test": "node --no-warnings src/tracker.test.js" },
+  "scripts": {
+    "start": "expo start --dev-client",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "test": "node --no-warnings src/tracker.test.js"
+  },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.1.2",
     "expo": "~53.0.0",
+    "expo-asset": "~11.1.7",
+    "expo-constants": "~17.1.8",
     "expo-dev-client": "~5.2.4",
+    "expo-file-system": "~18.1.11",
+    "expo-font": "~13.3.2",
     "expo-location": "~18.1.6",
     "expo-notifications": "~0.31.4",
     "expo-sensors": "~14.1.4",

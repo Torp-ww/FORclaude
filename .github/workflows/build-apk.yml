@@ -2,8 +2,6 @@ name: Build APK
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - '.github/workflows/emulator.yml'
   workflow_dispatch:
 
 concurrency:
@@ -16,15 +14,6 @@ permissions:
 jobs:
   apk:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { variant: F, keep: "", ascii: false }
-          - { variant: G, keep: "", ascii: true }
-          - { variant: H, keep: "expo-notifications", ascii: true }
-          - { variant: I, keep: "expo-location,expo-task-manager,expo-sensors,@react-native-async-storage/async-storage,react-native-svg", ascii: true }
-          - { variant: J, keep: "expo-dev-client", ascii: true }
     defaults:
       run:
         working-directory: stepcounter
@@ -41,43 +30,55 @@ jobs:
           java-version: 17
       - name: Accept Android licenses
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
-      - name: Configure variant
-        env:
-          KEEP: ${{ matrix.keep }}
-          ASCII: ${{ matrix.ascii }}
-        run: |
-          node -e "
-          const fs=require('fs');
-          const keep=(process.env.KEEP||'').split(',').filter(Boolean);
-          const extra=['expo-notifications','expo-location','expo-task-manager','expo-sensors','expo-dev-client','react-native-svg','@react-native-async-storage/async-storage'];
-          const p=JSON.parse(fs.readFileSync('package.json'));
-          for(const e of extra) if(!keep.includes(e)) delete p.dependencies[e];
-          fs.writeFileSync('package.json',JSON.stringify(p,null,2));
-          const a=JSON.parse(fs.readFileSync('app.json'));
-          a.expo.plugins=a.expo.plugins.filter(x=>keep.includes(Array.isArray(x)?x[0]:x));
-          a.expo.newArchEnabled=false;
-          if(process.env.ASCII==='true') a.expo.name='StepCounter';
-          fs.writeFileSync('app.json',JSON.stringify(a,null,2));"
-          cat > index.js <<'JS'
-          import React from 'react';
-          import { Text, View } from 'react-native';
-          import { registerRootComponent } from 'expo';
-          registerRootComponent(() => (
-            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0B1217' }}>
-              <Text style={{ color: '#5EEAD4', fontSize: 26 }}>Запуск работает</Text>
-            </View>
-          ));
-          JS
       - run: npm install --no-audit --no-fund
       - run: npx expo prebuild --platform android --no-install
       - name: Build release APK
         working-directory: stepcounter/android
         run: ./gradlew assembleRelease --no-daemon
       - name: Rename APK
-        run: cp android/app/build/outputs/apk/release/app-release.apk shagomer-${{ matrix.variant }}.apk
-      - name: Publish release
+        run: cp android/app/build/outputs/apk/release/app-release.apk shagomer.apk
+      - uses: actions/upload-artifact@v5
+        with:
+          name: shagomer-apk
+          path: stepcounter/shagomer.apk
+
+  test:
+    needs: apk
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: shagomer-apk
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Launch in emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: |
+            adb install -r shagomer.apk
+            adb logcat -c
+            adb shell monkey -p com.example.stepcounter -c android.intent.category.LAUNCHER 1
+            sleep 25
+            adb logcat -d > logcat-full.txt
+            adb shell pidof com.example.stepcounter > pid.txt || echo none > pid.txt
+            adb exec-out screencap -p > screen.png
+            grep -E "FATAL|AndroidRuntime|ReactNativeJS|SoLoader: Could|UnsatisfiedLink|ClassNotFound|NoSuchMethod|Cannot find" logcat-full.txt | head -200 > crash.txt || true
+      - name: Publish results
+        if: always()
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.run_number }}-${{ matrix.variant }}
-          name: Шагомер, сборка ${{ github.run_number }}, вариант ${{ matrix.variant }}
-          files: stepcounter/shagomer-${{ matrix.variant }}.apk
+          tag_name: build-${{ github.run_number }}
+          name: Шагомер, сборка ${{ github.run_number }}
+          files: |
+            shagomer.apk
+            crash.txt
+            screen.png
+            pid.txt
