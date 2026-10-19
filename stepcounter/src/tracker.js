@@ -58,10 +58,15 @@ export function addFix(s, fix) {
   const dt = (fix.t - last.t) / 1000;
   if (dt <= 0) return s;
   const d = haversine(last, fix);
-  const v = fix.speed != null && fix.speed >= 0 ? fix.speed : d / dt;
+  // Скорость 0 или её отсутствие считаем неизвестными: тогда скорость берём из смещения,
+  // а мелкие смещения в пределах точности GPS не считаем движением.
+  const reported = fix.speed != null && fix.speed > 0;
+  const acc = fix.accuracy != null ? fix.accuracy : 10;
+  const v = reported ? fix.speed : d / dt;
   if (v > MAX_SPEED) return s;
+  const minMove = reported ? 1 : Math.max(2.5, Math.min(acc * 0.8, 12));
   const next = { ...s, points: [...s.points] };
-  if (v >= MOVE_THRESHOLD && d >= 1) {
+  if (v >= MOVE_THRESHOLD && d >= minMove) {
     next.distance += d;
     next.movingMs += dt * 1000;
     next.calories += met(v * 3.6) * s.weight * dt / 3600;
@@ -71,7 +76,9 @@ export function addFix(s, fix) {
     next.points.push({ lat: fix.lat, lon: fix.lon, t: fix.t });
   } else {
     next.lastSpeed = 0;
-    next.points[next.points.length - 1] = { ...last, t: fix.t };
+    // без скорости окно измерения не сдвигаем вплотную, чтобы шаг считался за реальное время
+    const t = reported ? fix.t : Math.max(last.t, fix.t - 8000);
+    next.points[next.points.length - 1] = { ...last, t };
   }
   return next;
 }

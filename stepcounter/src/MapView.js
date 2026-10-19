@@ -3,7 +3,7 @@ import { View, Text, Image } from 'react-native';
 import Svg, { Polyline, Circle } from 'react-native-svg';
 import { C } from './theme';
 
-// Карта без ключей API: плитки CARTO (данные OpenStreetMap) + маршрут поверх.
+// Карта без ключей API: плитки OpenStreetMap + маршрут поверх.
 // Если интернета нет, видна тёмная подложка и сам маршрут.
 const T = 256;
 const lonX = (lon, z) => ((lon + 180) / 360) * 2 ** z;
@@ -36,7 +36,7 @@ export default function MapView({ points, height = 260, radius = 20 }) {
       for (let tx = Math.floor(left / T); tx <= Math.floor((left + w) / T); tx++) {
         if (ty < 0 || ty >= n) continue;
         const wx = ((tx % n) + n) % n;
-        tiles.push({ key: `${z}/${tx}/${ty}`, uri: `https://${'abcd'[(wx + ty) % 4]}.basemaps.cartocdn.com/dark_all/${z}/${wx}/${ty}.png`, x: tx * T - left, y: ty * T - top });
+        tiles.push({ key: `${z}/${tx}/${ty}`, uri: `https://tile.openstreetmap.org/${z}/${wx}/${ty}.png`, x: tx * T - left, y: ty * T - top });
       }
     }
     const xy = points.map((p) => [lonX(p.lon, z) * T - left, latY(p.lat, z) * T - top]);
@@ -47,7 +47,7 @@ export default function MapView({ points, height = 260, radius = 20 }) {
 
   return (
     <View onLayout={(e) => setW(Math.round(e.nativeEvent.layout.width))}
-      style={{ height, borderRadius: radius, overflow: 'hidden', backgroundColor: '#12131A' }}>
+      style={{ height, borderRadius: radius, overflow: 'hidden', backgroundColor: '#E8E4DC' }}>
       {view ? (
         <>
           {view.tiles.map((t) => (
@@ -57,14 +57,14 @@ export default function MapView({ points, height = 260, radius = 20 }) {
           <Svg width={w} height={height} style={{ position: 'absolute', left: 0, top: 0 }}>
             {view.segs.map((g, i) => (
               <React.Fragment key={i}>
-                <Polyline points={g.join(' ')} fill="none" stroke="#000" strokeOpacity="0.45" strokeWidth="8" strokeLinejoin="round" strokeLinecap="round" />
+                <Polyline points={g.join(' ')} fill="none" stroke="#fff" strokeOpacity="0.95" strokeWidth="9" strokeLinejoin="round" strokeLinecap="round" />
                 <Polyline points={g.join(' ')} fill="none" stroke={C.accent} strokeWidth="5" strokeLinejoin="round" strokeLinecap="round" />
               </React.Fragment>
             ))}
             <Circle cx={view.a[0]} cy={view.a[1]} r="7" fill="#fff" stroke="#000" strokeOpacity="0.4" strokeWidth="2" />
             <Circle cx={view.b[0]} cy={view.b[1]} r="9" fill={C.accent} stroke="#fff" strokeWidth="3" />
           </Svg>
-          <Text style={{ position: 'absolute', right: 8, bottom: 4, color: '#C9CBD3', fontSize: 9 }}>© OpenStreetMap, © CARTO</Text>
+          <Text style={{ position: 'absolute', right: 8, bottom: 4, color: '#333', fontSize: 9, backgroundColor: 'rgba(255,255,255,0.7)', paddingHorizontal: 3 }}>© OpenStreetMap</Text>
         </>
       ) : (
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>

@@ -48,6 +48,8 @@ export function startScan(onFound, onError) {
         if (dev && !seen.has(dev.id)) { seen.add(dev.id); onFound({ id: dev.id, name: dev.name || dev.localName || 'Датчик пульса' }); }
       });
     } else if (state === 'PoweredOff') onError('Включите Bluetooth на телефоне.');
+    else if (state === 'Unsupported') onError('На этом устройстве нет Bluetooth.');
+    else if (state === 'Unauthorized') onError('Разрешите доступ к Bluetooth в настройках телефона.');
   }, true);
   return () => { try { m.stopDeviceScan(); sub.remove(); } catch {} };
 }

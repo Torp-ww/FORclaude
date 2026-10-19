@@ -43,6 +43,8 @@ W=${SIZE%x*}; H=${SIZE#*x}
 scroll() { adb shell input swipe $((W/2)) $((H*70/100)) $((W/2)) $((H*25/100)) 400; sleep 1; }
 
 shot 01-idle
+tap_text "Подключить датчик пульса"; sleep 3; shot 01b-hr-modal
+adb shell input keyevent 4; sleep 2
 tap_text "Активности"; shot 02-history
 tap_text "Таблетки"; shot 03-pills
 tap_text "Профиль"; shot 04-profile
@@ -83,10 +85,14 @@ shot 07-recording-a
 python3 walk.py 25
 shot 08-recording-b
 scroll; shot 09-recording-scrolled
-tap_text "Пауза"; sleep 2; shot 10-paused
-tap_text "Завершить"; sleep 3; shot 11-summary
+# во время записи экран обновляется каждую секунду, uiautomator не успевает, поэтому нажимаем по координатам
+tapf() { adb shell input tap $((W*$1/1000)) $((H*$2/1000)); }
+tapf 500 765; sleep 3; shot 10-paused
+tapf 680 765; sleep 4; shot 11-summary
 scroll; shot 12-summary-2
 scroll; shot 13-summary-3
+scroll; shot 14-summary-4
+tap_text "Готово"; tap_text "Активности"; sleep 2; shot 15-history-item
 adb logcat -d > logcat-full.txt
 grep -E "FATAL|AndroidRuntime: |ReactNativeJS|Cannot find|UnsatisfiedLink|NoClassDef|NoSuchMethod" logcat-full.txt | grep -v -E "START com.android|Calling main entry|VM exiting|Using default boot|Leaving lock" | head -200 > crash.txt || true
 adb shell pidof $PKG > pid.txt || echo none > pid.txt
