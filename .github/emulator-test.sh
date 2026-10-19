@@ -55,29 +55,15 @@ sleep 3
 shot 06-started
 
 cat > walk.py <<'PY'
-import math, sys, time, subprocess, datetime
+import math, sys, time, subprocess
 lat, lon = 56.8389, 60.6057
-def nm(v, isLat):
-    a = abs(v); d = int(a); m = (a - d) * 60
-    return (f"{d:02d}" if isLat else f"{d:03d}") + f"{m:07.4f}"
-def cs(s):
-    c = 0
-    for ch in s: c ^= ord(ch)
-    return f"{c:02X}"
-def send(sentence):
-    full = f"${sentence}*{cs(sentence)}"
-    subprocess.run(['adb', 'emu', 'geo', 'nmea', full], stdout=subprocess.DEVNULL)
 heading = 45.0
 for i in range(int(sys.argv[1])):
     heading += 1.2
-    step = 1.6  # м/с
+    step = 1.6  # метров за секунду
     lat += step * math.cos(math.radians(heading)) / 111320
     lon += step * math.sin(math.radians(heading)) / (111320 * math.cos(math.radians(lat)))
-    now = datetime.datetime.utcnow()
-    hh = now.strftime('%H%M%S.00'); dd = now.strftime('%d%m%y')
-    la, lo = nm(lat, True), nm(lon, False)
-    send(f"GPGGA,{hh},{la},N,{lo},E,1,08,0.9,250.0,M,0.0,M,,")
-    send(f"GPRMC,{hh},A,{la},N,{lo},E,3.11,{heading % 360:.1f},{dd},,,A")
+    subprocess.run(['adb', 'emu', 'geo', 'fix', f'{lon:.7f}', f'{lat:.7f}', '250'], stdout=subprocess.DEVNULL)
     time.sleep(1)
 PY
 python3 walk.py 20
