@@ -38,10 +38,16 @@ tap_text() {
   echo "NOT FOUND: $1"; return 1
 }
 
+# системные окна «не отвечает» эмулятора закрываем нажатием «Wait» (не относится к приложению)
+anr() {
+  adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1 && adb pull /sdcard/ui.xml ui.xml >/dev/null 2>&1 && python3 tap.py "Wait" && sleep 2
+  return 0
+}
 SIZE=$(adb shell wm size | grep -oE '[0-9]+x[0-9]+' | tail -1)
 W=${SIZE%x*}; H=${SIZE#*x}
 scroll() { adb shell input swipe $((W/2)) $((H*70/100)) $((W/2)) $((H*25/100)) 400; sleep 1; }
 
+anr
 shot 01-idle
 tap_text "Подключить датчик пульса"; sleep 3; shot 01b-hr-modal
 adb shell input keyevent 4; sleep 2
@@ -50,6 +56,7 @@ tap_text "Таблетки"; shot 03-pills
 tap_text "Профиль"; shot 04-profile
 tap_text "Запись"
 shot 05-idle-again
+anr
 tap_text "Старт" || tap_text "СТАРТ"
 sleep 3
 shot 06-started
