@@ -1,19 +1,24 @@
 import './src/task';
-import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, Pressable, ScrollView, StyleSheet, Alert, Platform, SafeAreaView, TextInput, Switch } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, Pressable, ScrollView, StyleSheet, Alert, Platform, TextInput, Switch, Modal, ActivityIndicator, StatusBar as RNStatusBar } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { Pedometer } from 'expo-sensors';
-import RouteMap from './src/RouteMap';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import Svg, { Polyline } from 'react-native-svg';
 import { LOCATION_TASK } from './src/task';
 import * as P from './src/pills';
 import * as DB from './src/store';
-import { createSession, pauseSession, resumeSession, finishSession, summarize, kmh, fmtDuration, fmtDistance } from './src/tracker';
+import * as HR from './src/hr';
+import MapView, { RouteThumb } from './src/MapView';
+import { C } from './src/theme';
+import { Icon, Card, Metric, Button, RoundButton } from './src/ui';
+import { createSession, pauseSession, resumeSession, finishSession, summarize, kmh, fmtDuration, fmtPace, fmtKm, fmtMeters } from './src/tracker';
 
-const C = { bg: '#0B1217', card: '#131D25', line: '#26363F', fg: '#F2F6F8', dim: '#8896A0', acc: '#5EEAD4', warn: '#FBBF24', stop: '#FB7185' };
 const IOS = Platform.OS === 'ios';
+const HR_DEVICE_KEY = 'hr.device.v1';
 
-// Точные шаги даёт только iOS (история CoreMotion). На Android шаги считаются по расстоянию и длине шага.
 async function iosSteps(from, to) {
   if (!IOS) return null;
   try { return (await Pedometer.getStepCountAsync(new Date(from), new Date(to))).steps; } catch { return null; }
@@ -26,76 +31,166 @@ async function liveSteps(s) {
   const inPause = s.pausedAt ? (await iosSteps(s.pausedAt, end)) ?? 0 : 0;
   return Math.max(0, all - s.pausedSteps - inPause);
 }
-
 function startUpdates() {
   return Location.startLocationUpdatesAsync(LOCATION_TASK, {
     accuracy: Location.Accuracy.BestForNavigation, distanceInterval: 1, timeInterval: 1000,
     pausesUpdatesAutomatically: false, activityType: Location.ActivityType.Fitness,
     showsBackgroundLocationIndicator: true,
-    foregroundService: { notificationTitle: 'Шагомер', notificationBody: 'Идёт запись активности', notificationColor: '#5EEAD4' },
+    foregroundService: { notificationTitle: 'Шагомер', notificationBody: 'Идёт запись активности', notificationColor: '#FF5A1F' },
   });
 }
 async function stopUpdates() {
   try { if (await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK)) await Location.stopLocationUpdatesAsync(LOCATION_TASK); } catch {}
 }
 
-function Big({ label, value, unit }) {
+const fmtDate = (t) => new Date(t).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+const dayName = (t) => {
+  const h = new Date(t).getHours();
+  return h < 6 ? 'Ночная прогулка' : h < 12 ? 'Утренняя прогулка' : h < 18 ? 'Дневная прогулка' : 'Вечерняя прогулка';
+};
+
+function HrSpark({ samples }) {
+  if (!samples || samples.length < 3) return null;
+  const W = 300, H = 56;
+  const vals = samples.map((s) => s[1]);
+  const min = Math.min(...vals), max = Math.max(...vals), span = Math.max(max - min, 10);
+  const t1 = samples[samples.length - 1][0] || 1;
+  const pts = samples.map((s) => `${(s[0] / t1) * W},${H - 4 - ((s[1] - min) / span) * (H - 8)}`).join(' ');
   return (
-    <View style={s.big}>
-      <Text style={s.bigLabel}>{label}</Text>
-      <Text style={s.bigValue} adjustsFontSizeToFit numberOfLines={1}>{value}<Text style={s.bigUnit}> {unit}</Text></Text>
-    </View>
-  );
-}
-function Small({ label, value, unit }) {
-  return (
-    <View style={s.small}>
-      <Text style={s.smallLabel}>{label}</Text>
-      <Text style={s.smallValue}>{value}{unit ? <Text style={s.smallUnit}> {unit}</Text> : null}</Text>
-    </View>
+    <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+      <Polyline points={pts} fill="none" stroke={C.heart} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+    </Svg>
   );
 }
 
-function Summary({ session, steps, expanded, onToggle }) {
+// Экран с итогами активности: карта, расстояние в км и метрах, время, темп, скорости, калории, пульс.
+function ActivityView({ session, steps, bpm, live }) {
   const r = summarize(session, Date.now(), steps);
-  const d = fmtDistance(r.distance);
+  const points = session.points;
   return (
-    <View>
-      <View style={s.grid}>
-        <Big label="Шаги" value={r.steps.toLocaleString('ru-RU')} unit="" />
-        <Big label="Пройдено" value={d.v} unit={d.u} />
-        <Big label="Калории" value={Math.round(r.calories)} unit="ккал" />
-        <Big label="Время" value={fmtDuration(r.totalMs)} unit="" />
-      </View>
-      <Pressable onPress={onToggle} style={s.link}><Text style={s.linkText}>{expanded ? 'Скрыть подробности' : 'Подробнее'}</Text></Pressable>
-      {expanded && (
-        <View>
-          <View style={s.smallRow}>
-            <Small label="В движении" value={fmtDuration(r.movingMs)} />
-            <Small label="Стоял" value={fmtDuration(r.idleMs)} />
-          </View>
-          <View style={s.smallRow}>
-            <Small label="Средняя" value={kmh(r.avgSpeed).toFixed(1)} unit="км/ч" />
-            <Small label="Макс." value={kmh(r.maxSpeed).toFixed(1)} unit="км/ч" />
-            <Small label="Мин." value={kmh(r.minSpeed).toFixed(1)} unit="км/ч" />
-          </View>
-          <View style={s.card}><RouteMap points={session.points} /></View>
-          {!IOS && <Text style={s.note}>На Android шаги считаются по расстоянию и вашему росту, это приблизительно.</Text>}
+    <View style={{ gap: 12 }}>
+      <MapView points={points} height={live ? 240 : 280} />
+      <Card style={{ paddingVertical: 20 }}>
+        <Text style={s.label}>РАССТОЯНИЕ</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
+          <Text style={s.hero}>{fmtKm(r.distance)}</Text>
+          <Text style={s.heroUnit}>км</Text>
         </View>
+        <Text style={s.sub}>{fmtMeters(r.distance)}</Text>
+      </Card>
+      <Card>
+        <View style={s.row}>
+          <Metric label="Время" value={fmtDuration(r.totalMs)} />
+          <Metric label={live ? 'Темп сейчас' : 'Средний темп'} value={fmtPace(live ? r.speed : r.avgSpeed)} unit="/км" />
+          <Metric label="Шаги" value={r.steps.toLocaleString('ru-RU')} />
+        </View>
+      </Card>
+      <Card>
+        <Text style={[s.label, { marginBottom: 12 }]}>СКОРОСТЬ, КМ/Ч</Text>
+        <View style={s.row}>
+          <Metric label="Средняя" value={kmh(r.avgSpeed).toFixed(1)} />
+          <Metric label="Максимальная" value={kmh(r.maxSpeed).toFixed(1)} />
+          <Metric label="Минимальная" value={kmh(r.minSpeed).toFixed(1)} />
+        </View>
+        {live && <Text style={[s.sub, { marginTop: 10 }]}>Сейчас: {kmh(r.speed).toFixed(1)} км/ч</Text>}
+      </Card>
+      <View style={s.row2}>
+        <Card style={{ flex: 1 }}>
+          <View style={s.iconRow}><Icon name="flame" size={16} color={C.accent} /><Text style={s.label}>КАЛОРИИ</Text></View>
+          <Text style={s.val}>{Math.round(r.calories)}<Text style={s.unit}> ккал</Text></Text>
+        </Card>
+        <Card style={{ flex: 1 }}>
+          <View style={s.iconRow}><Icon name="heart" size={16} color={C.heart} fill={C.heart} /><Text style={s.label}>ПУЛЬС</Text></View>
+          {live ? (
+            <Text style={[s.val, { color: bpm ? C.heart : C.dim }]}>{bpm || '—'}<Text style={s.unit}> уд/мин</Text></Text>
+          ) : (
+            <Text style={s.val}>{r.hrAvg ?? '—'}<Text style={s.unit}> {r.hrAvg ? 'средний' : ''}</Text></Text>
+          )}
+          {!live && r.hrMax ? <Text style={s.sub}>макс. {r.hrMax}, мин. {r.hrMin}</Text> : null}
+        </Card>
+      </View>
+      {!live && session.hr && session.hr.samples && session.hr.samples.length > 2 && (
+        <Card><Text style={[s.label, { marginBottom: 8 }]}>ПУЛЬС ПО ХОДУ АКТИВНОСТИ</Text><HrSpark samples={session.hr.samples} /></Card>
       )}
+      <Card>
+        <View style={s.row}>
+          <Metric label="В движении" value={fmtDuration(r.movingMs)} />
+          <Metric label="Стоял" value={fmtDuration(r.idleMs)} />
+        </View>
+      </Card>
+      {!IOS && <Text style={[s.sub, { textAlign: 'center' }]}>На Android шаги считаются по расстоянию и росту, это приблизительно.</Text>}
     </View>
   );
 }
 
-function Walk({ profile }) {
+function HrModal({ visible, onClose, onPicked }) {
+  const [devices, setDevices] = useState([]);
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!visible) return;
+    let stop = () => {};
+    let alive = true;
+    (async () => {
+      setDevices([]); setMsg('Ищем датчики рядом...');
+      try {
+        if (!(await HR.requestPermissions())) { setMsg('Разрешите доступ к Bluetooth в настройках телефона.'); return; }
+        stop = HR.startScan((d) => alive && setDevices((l) => [...l, d]), (e) => alive && setMsg(e));
+      } catch (e) { setMsg('Bluetooth недоступен на этом устройстве.'); }
+    })();
+    return () => { alive = false; stop(); };
+  }, [visible]);
+  const pick = async (d) => { setBusy(true); try { await onPicked(d); onClose(); } catch (e) { setMsg('Не удалось подключиться. Проверьте, что датчик включён и не подключён к другому телефону.'); } setBusy(false); };
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.6)' }}>
+        <View style={{ backgroundColor: C.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: 20, paddingBottom: 32, minHeight: 320 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <Text style={s.h2}>Датчик пульса</Text>
+            <Pressable onPress={onClose} hitSlop={12}><Icon name="x" size={24} color={C.dim} /></Pressable>
+          </View>
+          <Text style={[s.sub, { marginBottom: 12 }]}>Подойдёт нагрудный ремень или часы с режимом «передача пульса» по Bluetooth.</Text>
+          {devices.map((d) => (
+            <Pressable key={d.id} onPress={() => pick(d)} style={s.device}>
+              <Icon name="bluetooth" size={20} color={C.accent} />
+              <Text style={{ color: C.fg, fontSize: 16, flex: 1 }}>{d.name}</Text>
+              <Icon name="chevron" size={18} color={C.dim} />
+            </Pressable>
+          ))}
+          {devices.length === 0 && <Text style={s.sub}>{msg}</Text>}
+          {busy && <ActivityIndicator color={C.accent} style={{ marginTop: 12 }} />}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function Walk({ profile, history, reloadHistory }) {
+  const insets = useSafeAreaInsets();
   const [session, setSession] = useState(null);
   const [steps, setSteps] = useState(null);
-  const [expanded, setExpanded] = useState(false);
   const [, tick] = useState(0);
+  const [bpm, setBpm] = useState(0);
+  const [hrName, setHrName] = useState('');
+  const [hrOpen, setHrOpen] = useState(false);
+  const hrRef = useRef({ sum: 0, count: 0, max: 0, min: 999, samples: [], lastSample: 0 });
   const active = session && !session.endedAt;
   const paused = active && !!session.pausedAt;
 
-  // Подхватываем активность, которая шла в фоне, и обновляем экран каждую секунду.
+  const onBpm = useCallback((v) => {
+    setBpm(v);
+    if (!hrRef.current.recording) return;
+    const h = hrRef.current;
+    h.sum += v; h.count += 1; h.max = Math.max(h.max, v); h.min = Math.min(h.min, v);
+    const t = Date.now();
+    if (t - h.lastSample >= 5000 && h.samples.length < 3000) { h.samples.push([Math.round((t - h.t0) / 1000), v]); h.lastSample = t; }
+  }, []);
+  const connectSaved = useCallback(async (dev) => {
+    const name = await HR.connect(dev.id, onBpm, () => setBpm(0));
+    setHrName(name);
+    await AsyncStorage.setItem(HR_DEVICE_KEY, JSON.stringify({ id: dev.id, name })).catch(() => {});
+  }, [onBpm]);
+
   useEffect(() => {
     let alive = true;
     const pull = async () => {
@@ -103,7 +198,7 @@ function Walk({ profile }) {
       if (!alive || !a) return;
       setSession(a); setSteps(await liveSteps(a)); tick((n) => n + 1);
     };
-    DB.loadActive().then((a) => a && setSession(a));
+    DB.loadActive().then((a) => { if (a) { setSession(a); hrRef.current.recording = !a.pausedAt; hrRef.current.t0 = a.startedAt; } });
     const id = setInterval(pull, 1000);
     return () => { alive = false; clearInterval(id); };
   }, []);
@@ -115,12 +210,15 @@ function Walk({ profile }) {
     if (!bg.granted) Alert.alert('Фоновая запись выключена', 'Чтобы считать шаги при выключенном экране, выберите для геолокации «Всегда» в настройках телефона.');
     if (IOS) { try { await Pedometer.requestPermissionsAsync(); } catch {} }
     const s0 = createSession(Date.now(), profile);
-    await DB.saveActive(s0); setSession(s0); setSteps(0); setExpanded(false);
+    hrRef.current = { sum: 0, count: 0, max: 0, min: 999, samples: [], lastSample: 0, recording: true, t0: s0.startedAt };
+    await DB.saveActive(s0); setSession(s0); setSteps(0);
     await startUpdates();
-  }, [profile]);
+    // пробуем подключить сохранённый датчик пульса (без ожидания)
+    AsyncStorage.getItem(HR_DEVICE_KEY).then((v) => { if (v) { HR.requestPermissions().then((ok) => ok && connectSaved(JSON.parse(v)).catch(() => {})); } }).catch(() => {});
+  }, [profile, connectSaved]);
 
   const pause = async () => {
-    await stopUpdates();
+    await stopUpdates(); hrRef.current.recording = false;
     const s1 = pauseSession((await DB.loadActive()) ?? session);
     await DB.saveActive(s1); setSession(s1);
   };
@@ -130,77 +228,116 @@ function Walk({ profile }) {
       const inPause = (await iosSteps(s1.pausedAt, Date.now())) ?? 0;
       s1 = { ...s1, pausedSteps: s1.pausedSteps + inPause };
     }
-    s1 = resumeSession(s1);
+    s1 = resumeSession(s1); hrRef.current.recording = true;
     await DB.saveActive(s1); setSession(s1);
     await startUpdates();
   };
   const stop = async () => {
-    await stopUpdates();
+    await stopUpdates(); hrRef.current.recording = false;
     let s1 = (await DB.loadActive()) ?? session;
     const st = await liveSteps(s1);
     s1 = finishSession(s1); s1.finalSteps = st;
-    const hist = await DB.loadHistory();
-    if (s1.distance > 0) await DB.saveHistory([{ id: String(s1.startedAt), ...s1 }, ...hist].slice(0, 100));
+    const h = hrRef.current;
+    if (h.count > 0) s1.hr = { avg: Math.round(h.sum / h.count), max: h.max, min: h.min, samples: h.samples };
+    if (s1.distance > 0) await DB.saveHistory([{ id: String(s1.startedAt), ...s1 }, ...(await DB.loadHistory())].slice(0, 100));
     await DB.clearActive();
-    setSession(s1); setSteps(st);
+    HR.disconnect(); setBpm(0);
+    setSession(s1); setSteps(st); reloadHistory();
   };
   const reset = () => { setSession(null); setSteps(null); };
 
+  const today = useMemo(() => {
+    const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+    let d = 0, k = 0, st = 0;
+    history.filter((h) => h.startedAt >= t0.getTime()).forEach((h) => { const r = summarize(h); d += r.distance; k += r.calories; st += r.steps; });
+    return { d, k, st };
+  }, [history]);
+
   return (
     <View style={{ flex: 1 }}>
-      <ScrollView contentContainerStyle={s.body}>
-        {!session && (
-          <View style={s.empty}>
-            <Text style={s.emptyTitle}>Готовы идти?</Text>
-            <Text style={s.emptyText}>Нажмите «Старт» и идите. Телефон можно убрать в карман, экран может быть выключен.</Text>
+      {!session && (
+        <View style={{ flex: 1, paddingHorizontal: 20 }}>
+          <Text style={s.h1}>Сегодня</Text>
+          <Card>
+            <View style={s.row}>
+              <Metric label="Пройдено" value={fmtKm(today.d)} unit="км" />
+              <Metric label="Шаги" value={today.st.toLocaleString('ru-RU')} />
+              <Metric label="Ккал" value={Math.round(today.k)} />
+            </View>
+          </Card>
+          <Pressable onPress={() => setHrOpen(true)} style={s.hrChip}>
+            <Icon name="heart" size={18} color={C.heart} fill={bpm ? C.heart : 'none'} />
+            <Text style={{ color: C.fg, fontSize: 15, flex: 1 }}>{hrName ? `Пульс: ${hrName}${bpm ? `, ${bpm} уд/мин` : ''}` : 'Подключить датчик пульса'}</Text>
+            <Icon name="chevron" size={18} color={C.dim} />
+          </Pressable>
+          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+            <View style={s.ring}>
+              <Pressable onPress={start} accessibilityLabel="Старт" style={({ pressed }) => [s.startBtn, pressed && { opacity: 0.85 }]}>
+                <Text style={s.startText}>СТАРТ</Text>
+              </Pressable>
+            </View>
+            <Text style={[s.sub, { marginTop: 20, textAlign: 'center' }]}>Телефон можно убрать в карман, экран может быть выключен.</Text>
           </View>
-        )}
-        {session && (
-          <>
-            <Text style={[s.state, paused && { color: C.warn }, !active && { color: C.dim }]}>
-              {!active ? 'ГОТОВО' : paused ? 'ПАУЗА' : 'ИДЁТ ЗАПИСЬ'}
-            </Text>
-            <Summary session={session} steps={steps} expanded={expanded} onToggle={() => setExpanded((e) => !e)} />
-          </>
-        )}
-      </ScrollView>
-      <View style={s.footer}>
-        {!session && <Btn text="Старт" onPress={start} />}
-        {active && !paused && (<View style={s.btnRow}><Btn grow text="Пауза" color={C.warn} onPress={pause} /><Btn grow text="Стоп" color={C.stop} onPress={stop} /></View>)}
-        {paused && (<View style={s.btnRow}><Btn grow text="Продолжить" onPress={resume} /><Btn grow text="Стоп" color={C.stop} onPress={stop} /></View>)}
-        {session && !active && <Btn text="Готово" onPress={reset} />}
-      </View>
+        </View>
+      )}
+      {session && (
+        <>
+          <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: active ? 150 : 24 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+              <View style={[s.dot, { backgroundColor: !active ? C.dim : paused ? C.warn : C.green }]} />
+              <Text style={s.status}>{!active ? dayName(session.startedAt).toUpperCase() : paused ? 'ПАУЗА' : 'ЗАПИСЬ'}</Text>
+              {!active && <Text style={[s.sub, { marginLeft: 'auto' }]}>{fmtDate(session.startedAt)}</Text>}
+            </View>
+            <ActivityView session={session} steps={steps} bpm={bpm} live={active} />
+            {!active && <Button text="Готово" onPress={reset} style={{ marginTop: 16 }} />}
+          </ScrollView>
+          {active && (
+            <View style={[s.controls, { paddingBottom: 16 }]}>
+              {!paused ? <RoundButton icon="pause" label="Пауза" onPress={pause} /> : (
+                <View style={{ flexDirection: 'row', gap: 40 }}>
+                  <RoundButton icon="play" label="Продолжить" color={C.green} onPress={resume} />
+                  <RoundButton icon="stop" label="Завершить" color={C.stop} onPress={stop} />
+                </View>
+              )}
+            </View>
+          )}
+        </>
+      )}
+      <HrModal visible={hrOpen} onClose={() => setHrOpen(false)} onPicked={connectSaved} />
     </View>
   );
 }
 
-function Btn({ text, onPress, color = C.acc, grow }) {
-  return <Pressable onPress={onPress} style={[s.btn, grow && { flex: 1 }, { backgroundColor: color }]}><Text style={s.btnText}>{text}</Text></Pressable>;
-}
-
-function History() {
-  const [list, setList] = useState([]);
+function History({ history, reload }) {
   const [open, setOpen] = useState(null);
-  useEffect(() => { DB.loadHistory().then(setList); }, []);
-  const remove = async (id) => { const n = list.filter((h) => h.id !== id); setList(n); setOpen(null); await DB.saveHistory(n); };
-  const fmt = (t) => new Date(t).toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+  const remove = async (id) => { await DB.saveHistory(history.filter((h) => h.id !== id)); setOpen(null); reload(); };
   if (open) return (
-    <ScrollView contentContainerStyle={s.body}>
-      <Pressable onPress={() => setOpen(null)}><Text style={s.back}>← Назад</Text></Pressable>
-      <Text style={s.state}>{fmt(open.startedAt).toUpperCase()}</Text>
-      <Summary session={open} steps={null} expanded onToggle={() => {}} />
-      <Pressable onPress={() => remove(open.id)} style={s.del}><Text style={s.delText}>Удалить</Text></Pressable>
+    <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 32 }}>
+      <Pressable onPress={() => setOpen(null)} style={{ marginBottom: 12 }}><Text style={s.back}>‹ Все активности</Text></Pressable>
+      <Text style={s.h2}>{dayName(open.startedAt)}</Text>
+      <Text style={[s.sub, { marginBottom: 14 }]}>{fmtDate(open.startedAt)}</Text>
+      <ActivityView session={open} steps={null} live={false} />
+      <Pressable onPress={() => remove(open.id)} style={{ alignItems: 'center', padding: 18 }}><Text style={{ color: C.stop, fontSize: 16, fontWeight: '600' }}>Удалить запись</Text></Pressable>
     </ScrollView>
   );
   return (
-    <ScrollView contentContainerStyle={s.body}>
-      {list.length === 0 && <Text style={s.emptyText}>Здесь появятся ваши прогулки.</Text>}
-      {list.map((h) => {
-        const r = summarize(h), d = fmtDistance(r.distance);
+    <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 32 }}>
+      <Text style={s.h1}>Активности</Text>
+      {history.length === 0 && <Text style={s.sub}>Здесь появятся ваши прогулки, с картой маршрута и статистикой.</Text>}
+      {history.map((h) => {
+        const r = summarize(h);
         return (
-          <Pressable key={h.id} style={s.item} onPress={() => setOpen(h)}>
-            <View><Text style={s.itemTitle}>{fmt(h.startedAt)}</Text><Text style={s.itemSub}>{fmtDuration(r.totalMs)} · {Math.round(r.calories)} ккал</Text></View>
-            <View style={{ alignItems: 'flex-end' }}><Text style={s.itemVal}>{d.v} {d.u}</Text><Text style={s.itemSub}>{r.steps.toLocaleString('ru-RU')} шагов</Text></View>
+          <Pressable key={h.id} onPress={() => setOpen(h)} style={s.item}>
+            <RouteThumb points={h.points} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={{ color: C.fg, fontSize: 16, fontWeight: '700' }} numberOfLines={1}>{dayName(h.startedAt)}</Text>
+              <Text style={s.sub}>{fmtDate(h.startedAt)}</Text>
+              <Text style={[s.sub, { marginTop: 4 }]}>{fmtDuration(r.totalMs)} · {kmh(r.avgSpeed).toFixed(1)} км/ч · {Math.round(r.calories)} ккал</Text>
+            </View>
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={{ color: C.accent, fontSize: 22, fontWeight: '800' }}>{fmtKm(r.distance)}</Text>
+              <Text style={s.sub}>км</Text>
+            </View>
           </Pressable>
         );
       })}
@@ -214,7 +351,6 @@ function Pills() {
   const [time, setTime] = useState('');
   useEffect(() => { DB.loadPills().then(setList); }, []);
   const commit = async (n) => { setList(n); await DB.savePills(n); };
-
   const add = async () => {
     const t = P.normalizeTime(time);
     if (!name.trim()) return Alert.alert('Введите название таблетки');
@@ -230,27 +366,27 @@ function Pills() {
     await commit(list.map((x) => (x.id === p.id ? { ...x, on: !p.on, nid } : x)));
   };
   const remove = async (p) => { await P.cancelPill(p.nid); await commit(list.filter((x) => x.id !== p.id)); };
-
   return (
-    <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
+    <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 32 }} keyboardShouldPersistTaps="handled">
+      <Text style={s.h1}>Таблетки</Text>
       {list.map((p) => (
         <View key={p.id} style={s.item}>
           <View style={{ flex: 1 }}>
             <Text style={[s.pillTime, !p.on && { color: C.dim }]}>{p.time}</Text>
-            <Text style={s.itemSub}>{p.name}</Text>
+            <Text style={s.sub}>{p.name}</Text>
           </View>
-          <Switch value={p.on} onValueChange={() => toggle(p)} trackColor={{ true: C.acc, false: C.line }} />
-          <Pressable onPress={() => remove(p)} style={{ paddingLeft: 16 }}><Text style={s.delText}>✕</Text></Pressable>
+          <Switch value={p.on} onValueChange={() => toggle(p)} trackColor={{ true: C.accent, false: C.line }} thumbColor="#fff" />
+          <Pressable onPress={() => remove(p)} hitSlop={10} style={{ paddingLeft: 16 }}><Icon name="x" size={20} color={C.dim} /></Pressable>
         </View>
       ))}
-      {list.length === 0 && <Text style={[s.emptyText, { marginBottom: 16 }]}>Напоминаний пока нет. Добавьте первое, телефон будет напоминать каждый день.</Text>}
-      <View style={s.card2}>
-        <Text style={s.label}>Название</Text>
+      {list.length === 0 && <Text style={[s.sub, { marginBottom: 16 }]}>Напоминаний пока нет. Добавьте первое, телефон будет напоминать каждый день.</Text>}
+      <Card style={{ gap: 8 }}>
+        <Text style={s.label}>НАЗВАНИЕ</Text>
         <TextInput style={s.input} value={name} onChangeText={setName} placeholder="Например, Витамин D" placeholderTextColor={C.dim} />
-        <Text style={s.label}>Время</Text>
+        <Text style={s.label}>ВРЕМЯ</Text>
         <TextInput style={s.input} value={time} onChangeText={setTime} placeholder="08:30" placeholderTextColor={C.dim} keyboardType="numbers-and-punctuation" maxLength={5} />
-        <Btn text="Добавить напоминание" onPress={add} />
-      </View>
+        <Button text="Добавить напоминание" onPress={add} style={{ marginTop: 6 }} />
+      </Card>
     </ScrollView>
   );
 }
@@ -264,85 +400,79 @@ function Me({ profile, setProfile }) {
     const p = { weight, height }; setProfile(p); await DB.saveProfile(p); Alert.alert('Сохранено', 'Данные применятся к новой прогулке.');
   };
   return (
-    <ScrollView contentContainerStyle={s.body} keyboardShouldPersistTaps="handled">
-      <Text style={[s.emptyText, { marginBottom: 16 }]}>Вес нужен для калорий, рост для длины шага.</Text>
-      <View style={s.card2}>
-        <Text style={s.label}>Вес, кг</Text>
+    <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 32 }} keyboardShouldPersistTaps="handled">
+      <Text style={s.h1}>Профиль</Text>
+      <Text style={[s.sub, { marginBottom: 16 }]}>Вес нужен для калорий, рост для длины шага.</Text>
+      <Card style={{ gap: 8 }}>
+        <Text style={s.label}>ВЕС, КГ</Text>
         <TextInput style={s.input} value={w} onChangeText={setW} keyboardType="decimal-pad" />
-        <Text style={s.label}>Рост, см</Text>
+        <Text style={s.label}>РОСТ, СМ</Text>
         <TextInput style={s.input} value={h} onChangeText={setH} keyboardType="decimal-pad" />
-        <Btn text="Сохранить" onPress={save} />
-      </View>
+        <Button text="Сохранить" onPress={save} style={{ marginTop: 6 }} />
+      </Card>
     </ScrollView>
   );
 }
 
-export default function App() {
+function Root() {
+  const insets = useSafeAreaInsets();
   const [tab, setTab] = useState('walk');
   const [profile, setProfile] = useState({ weight: 70, height: 170 });
+  const [history, setHistory] = useState([]);
   const [ready, setReady] = useState(false);
-  useEffect(() => { DB.loadProfile().then((p) => { setProfile(p); setReady(true); }); }, []);
-  const tabs = [['walk', 'Ходьба'], ['history', 'История'], ['pills', 'Таблетки'], ['me', 'Я']];
+  const reloadHistory = useCallback(() => DB.loadHistory().then(setHistory), []);
+  useEffect(() => { Promise.all([DB.loadProfile().then(setProfile), reloadHistory()]).then(() => setReady(true)); }, [reloadHistory]);
+  const tabs = [['walk', 'Запись', 'record'], ['history', 'Активности', 'clock'], ['pills', 'Таблетки', 'pill'], ['me', 'Профиль', 'user']];
   return (
-    <SafeAreaView style={s.root}>
+    <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top }}>
       <StatusBar style="light" />
       <View style={{ flex: 1 }}>
-        {ready && tab === 'walk' && <Walk profile={profile} />}
-        {ready && tab === 'history' && <History />}
+        {ready && tab === 'walk' && <Walk profile={profile} history={history} reloadHistory={reloadHistory} />}
+        {ready && tab === 'history' && <History history={history} reload={reloadHistory} />}
         {ready && tab === 'pills' && <Pills />}
         {ready && tab === 'me' && <Me profile={profile} setProfile={setProfile} />}
       </View>
-      <View style={s.tabs}>
-        {tabs.map(([k, l]) => (
-          <Pressable key={k} onPress={() => setTab(k)} style={s.tab}>
-            <Text style={[s.tabText, tab === k && s.tabTextOn]}>{l}</Text>
-            <View style={[s.dot, tab === k && { backgroundColor: C.acc }]} />
+      <View style={[s.tabs, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+        {tabs.map(([k, l, icon]) => (
+          <Pressable key={k} onPress={() => setTab(k)} style={s.tab} accessibilityLabel={l}>
+            <Icon name={icon} size={24} color={tab === k ? C.accent : C.dim} />
+            <Text style={[s.tabText, tab === k && { color: C.accent }]}>{l}</Text>
           </Pressable>
         ))}
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
+export default function App() {
+  return <SafeAreaProvider><Root /></SafeAreaProvider>;
+}
+
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: C.bg, paddingTop: Platform.OS === 'android' ? 32 : 0 },
-  body: { padding: 16, paddingBottom: 24 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  big: { width: '47.5%', flexGrow: 1, backgroundColor: C.card, borderRadius: 18, padding: 16 },
-  bigLabel: { color: C.dim, fontSize: 14, marginBottom: 6 },
-  bigValue: { color: C.fg, fontSize: 38, fontWeight: '800', fontVariant: ['tabular-nums'] },
-  bigUnit: { color: C.dim, fontSize: 16, fontWeight: '500' },
-  small: { flex: 1, backgroundColor: C.card, borderRadius: 14, padding: 12 },
-  smallRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
-  smallLabel: { color: C.dim, fontSize: 12, marginBottom: 4 },
-  smallValue: { color: C.fg, fontSize: 18, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  smallUnit: { color: C.dim, fontSize: 12, fontWeight: '500' },
-  link: { paddingVertical: 14, alignItems: 'center' },
-  linkText: { color: C.acc, fontSize: 16, fontWeight: '600' },
-  card: { backgroundColor: C.card, borderRadius: 14, overflow: 'hidden' },
-  card2: { backgroundColor: C.card, borderRadius: 18, padding: 16, gap: 8 },
-  note: { color: C.dim, fontSize: 13, marginTop: 12 },
-  state: { color: C.acc, fontSize: 13, letterSpacing: 1.5, fontWeight: '700', marginBottom: 12 },
-  empty: { paddingVertical: 48 },
-  emptyTitle: { color: C.fg, fontSize: 32, fontWeight: '800', marginBottom: 12 },
-  emptyText: { color: C.dim, fontSize: 17, lineHeight: 25 },
-  footer: { padding: 16, borderTopWidth: 1, borderTopColor: C.line },
-  btnRow: { flexDirection: 'row', gap: 12 },
-  btn: { borderRadius: 16, paddingVertical: 18, alignItems: 'center', marginTop: 4 },
-  btnText: { color: '#06201C', fontSize: 19, fontWeight: '800' },
-  tabs: { flexDirection: 'row', borderTopWidth: 1, borderTopColor: C.line, paddingBottom: 6 },
-  tab: { flex: 1, alignItems: 'center', paddingTop: 12, gap: 6 },
-  tabText: { color: C.dim, fontSize: 15, fontWeight: '600' },
-  tabTextOn: { color: C.fg },
-  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: 'transparent' },
-  item: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: C.card, borderRadius: 16, padding: 16, marginBottom: 10 },
-  itemTitle: { color: C.fg, fontSize: 16, fontWeight: '600' },
-  itemVal: { color: C.acc, fontSize: 18, fontWeight: '700' },
-  itemSub: { color: C.dim, fontSize: 14, marginTop: 3 },
-  pillTime: { color: C.fg, fontSize: 28, fontWeight: '800', fontVariant: ['tabular-nums'] },
-  label: { color: C.dim, fontSize: 14, marginTop: 4 },
-  input: { backgroundColor: C.bg, color: C.fg, borderRadius: 12, borderWidth: 1, borderColor: C.line, padding: 14, fontSize: 18 },
-  back: { color: C.acc, fontSize: 16, fontWeight: '600', marginBottom: 12 },
-  del: { alignItems: 'center', padding: 16, marginTop: 8 },
-  delText: { color: C.stop, fontSize: 16, fontWeight: '600' },
+  h1: { color: C.fg, fontSize: 32, fontWeight: '800', marginTop: 8, marginBottom: 16 },
+  h2: { color: C.fg, fontSize: 22, fontWeight: '800' },
+  label: { color: C.dim, fontSize: 12, fontWeight: '700', letterSpacing: 0.8 },
+  hero: { color: C.fg, fontSize: 64, fontWeight: '900', fontVariant: ['tabular-nums'], letterSpacing: -1 },
+  heroUnit: { color: C.dim, fontSize: 22, fontWeight: '700' },
+  sub: { color: C.dim, fontSize: 14 },
+  val: { color: C.fg, fontSize: 28, fontWeight: '800', marginTop: 6, fontVariant: ['tabular-nums'] },
+  unit: { color: C.dim, fontSize: 13, fontWeight: '600' },
+  row: { flexDirection: 'row', gap: 12 },
+  row2: { flexDirection: 'row', gap: 12 },
+  iconRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  status: { color: C.fg, fontSize: 13, fontWeight: '800', letterSpacing: 1.2 },
+  dot: { width: 10, height: 10, borderRadius: 5 },
+  hrChip: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: C.surface, borderRadius: 16, padding: 14, marginTop: 12 },
+  ring: { width: 214, height: 214, borderRadius: 107, borderWidth: 3, borderColor: C.accentSoft, alignItems: 'center', justifyContent: 'center' },
+  startBtn: { width: 180, height: 180, borderRadius: 90, backgroundColor: C.accent, alignItems: 'center', justifyContent: 'center' },
+  startText: { color: '#fff', fontSize: 30, fontWeight: '900', letterSpacing: 2 },
+  controls: { position: 'absolute', left: 0, right: 0, bottom: 0, alignItems: 'center', paddingTop: 16, backgroundColor: C.bg, borderTopWidth: 1, borderTopColor: C.line },
+  tabs: { flexDirection: 'row', backgroundColor: C.surface, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 8 },
+  tab: { flex: 1, alignItems: 'center', gap: 4, paddingVertical: 4 },
+  tabText: { color: C.dim, fontSize: 11, fontWeight: '600' },
+  item: { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: C.surface, borderRadius: 20, padding: 14, marginBottom: 12 },
+  pillTime: { color: C.fg, fontSize: 30, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  input: { backgroundColor: C.bg, color: C.fg, borderRadius: 14, borderWidth: 1, borderColor: C.line, padding: 14, fontSize: 18 },
+  back: { color: C.accent, fontSize: 17, fontWeight: '600' },
+  device: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.surface2, borderRadius: 14, padding: 14, marginBottom: 8 },
 });

@@ -30,6 +30,7 @@ export function createSession(now = Date.now(), profile = {}) {
     distance: 0, movingMs: 0, maxSpeed: 0, minSpeed: null, calories: 0,
     weight, stride: (height / 100) * 0.413,           // длина шага в метрах
     pausedAt: null, pausedMs: 0, pausedSteps: 0, skipNext: false, finalSteps: null,
+    lastSpeed: 0, hr: null,
   };
 }
 
@@ -64,10 +65,12 @@ export function addFix(s, fix) {
     next.distance += d;
     next.movingMs += dt * 1000;
     next.calories += met(v * 3.6) * s.weight * dt / 3600;
+    next.lastSpeed = v;
     next.maxSpeed = Math.max(next.maxSpeed, v);
     next.minSpeed = next.minSpeed == null ? v : Math.min(next.minSpeed, v);
     next.points.push({ lat: fix.lat, lon: fix.lon, t: fix.t });
   } else {
+    next.lastSpeed = 0;
     next.points[next.points.length - 1] = { ...last, t: fix.t };
   }
   return next;
@@ -84,6 +87,8 @@ export function summarize(s, now = Date.now(), liveSteps = null) {
     totalMs, movingMs, idleMs: totalMs - movingMs,
     avgSpeed: movingMs > 0 ? s.distance / (movingMs / 1000) : 0,
     maxSpeed: s.maxSpeed, minSpeed: s.minSpeed ?? 0,
+    speed: s.pausedAt || s.endedAt ? 0 : s.lastSpeed,
+    hrAvg: s.hr ? s.hr.avg : null, hrMax: s.hr ? s.hr.max : null, hrMin: s.hr ? s.hr.min : null,
   };
 }
 
@@ -96,3 +101,11 @@ export function fmtDuration(ms) {
 export function fmtDistance(m) {
   return m >= 1000 ? { v: (m / 1000).toFixed(2), u: 'км' } : { v: Math.round(m).toString(), u: 'м' };
 }
+
+export function fmtPace(speed) {
+  if (!speed || speed < 0.3) return '—';
+  const sec = Math.round(1000 / speed), m = Math.floor(sec / 60), r = sec % 60;
+  return `${m}:${String(r).padStart(2, '0')}`;
+}
+export const fmtKm = (m) => (m / 1000).toFixed(2);
+export const fmtMeters = (m) => `${Math.round(m).toLocaleString('ru-RU')} м`;

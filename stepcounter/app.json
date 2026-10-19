@@ -2,7 +2,7 @@
   "expo": {
     "name": "Шагомер",
     "slug": "step-counter",
-    "version": "2.0.0",
+    "version": "3.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "ios": {
@@ -10,19 +10,25 @@
       "bundleIdentifier": "com.example.stepcounter",
       "infoPlist": {
         "UIBackgroundModes": [
-          "location"
+          "location",
+          "bluetooth-central"
         ],
         "NSLocationWhenInUseUsageDescription": "Нужна геолокация, чтобы считать расстояние и скорость.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Нужна геолокация, чтобы считать шаги, когда экран выключен.",
-        "NSMotionUsageDescription": "Нужен доступ к движению, чтобы считать шаги."
+        "NSMotionUsageDescription": "Нужен доступ к движению, чтобы считать шаги.",
+        "NSBluetoothAlwaysUsageDescription": "Нужен Bluetooth, чтобы получать пульс с датчика."
       }
     },
     "android": {
       "package": "com.example.stepcounter",
       "permissions": [
-        "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "BLUETOOTH",
+        "BLUETOOTH_ADMIN",
+        "BLUETOOTH_CONNECT",
+        "BLUETOOTH_SCAN",
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_LOCATION",
         "POST_NOTIFICATIONS",
@@ -47,7 +53,17 @@
         }
       ],
       "expo-asset",
-      "expo-font"
+      "expo-font",
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": true,
+          "modes": [
+            "central"
+          ],
+          "bluetoothAlwaysPermission": "Нужен Bluetooth, чтобы получать пульс с датчика."
+        }
+      ]
     ],
     "newArchEnabled": false
   }
