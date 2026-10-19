@@ -55,9 +55,9 @@ sleep 3
 shot 06-started
 
 cat > walk.py <<'PY'
-import math, sys, time, subprocess
-lat, lon = 56.8389, 60.6057
-heading = 45.0
+import math, sys, time, subprocess, json, os
+ST = 'walk.state'
+lat, lon, heading = (json.load(open(ST)) if os.path.exists(ST) else [56.8389, 60.6057, 45.0])
 for i in range(int(sys.argv[1])):
     heading += 1.2
     step = 1.6  # метров за секунду
@@ -65,6 +65,7 @@ for i in range(int(sys.argv[1])):
     lon += step * math.sin(math.radians(heading)) / (111320 * math.cos(math.radians(lat)))
     subprocess.run(['adb', 'emu', 'geo', 'fix', f'{lon:.7f}', f'{lat:.7f}', '250'], stdout=subprocess.DEVNULL)
     time.sleep(1)
+json.dump([lat, lon, heading], open(ST, 'w'))
 PY
 python3 walk.py 20
 shot 07-recording-a
