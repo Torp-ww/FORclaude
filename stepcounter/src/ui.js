@@ -4,7 +4,7 @@ import Svg, { Path, Circle, Rect, Polyline, Polygon } from 'react-native-svg';
 import { C } from './theme';
 
 // Иконки в стиле Feather/Lucide
-export function Icon({ name, size = 24, color = C.fg, fill = 'none', strokeWidth = 2 }) {
+export function Icon({ name, size = 24, color = C.fg, fill = 'none', strokeWidth = 2, style }) {
   const p = { stroke: color, strokeWidth, strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none' };
   let body = null;
   switch (name) {
@@ -18,11 +18,12 @@ export function Icon({ name, size = 24, color = C.fg, fill = 'none', strokeWidth
     case 'pause': body = (<><Rect x="6" y="4" width="4" height="16" rx="1" fill={color} /><Rect x="14" y="4" width="4" height="16" rx="1" fill={color} /></>); break;
     case 'play': body = <Polygon points="6 3 20 12 6 21 6 3" fill={color} />; break;
     case 'stop': body = <Rect x="5" y="5" width="14" height="14" rx="2.5" fill={color} />; break;
+    case 'chart': body = (<><Path d="M18 20V10" {...p} /><Path d="M12 20V4" {...p} /><Path d="M6 20v-6" {...p} /></>); break;
     case 'x': body = <Path d="M18 6L6 18M6 6l12 12" {...p} />; break;
     case 'chevron': body = <Path d="M9 18l6-6-6-6" {...p} />; break;
     default: body = null;
   }
-  return <Svg width={size} height={size} viewBox="0 0 24 24">{body}</Svg>;
+  return <Svg width={size} height={size} viewBox="0 0 24 24" style={style}>{body}</Svg>;
 }
 
 export function Card({ children, style }) { return <View style={[ui.card, style]}>{children}</View>; }

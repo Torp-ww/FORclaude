@@ -51,7 +51,7 @@ anr
 shot 01-idle
 tap_text "Подключить датчик пульса"; sleep 3; shot 01b-hr-modal
 adb shell input keyevent 4; sleep 2
-tap_text "Активности"; shot 02-history
+tap_text "Статистика"; sleep 2; shot 02-stats-week; scroll; shot 02b-stats-week2; scroll; shot 02c-stats-week3; scroll; shot 02d-stats-week4; scroll; shot 02e-stats-week5; tap_text "Месяц"; sleep 1; shot 02f-stats-month; tap_text "История"; sleep 1; shot 02g-history
 tap_text "Таблетки"; shot 03-pills
 tap_text "Профиль"; shot 04-profile
 tap_text "Запись"
@@ -86,7 +86,7 @@ tapf 680 765; sleep 4; shot 11-summary
 scroll; shot 12-summary-2
 scroll; shot 13-summary-3
 scroll; shot 14-summary-4
-tap_text "Готово"; tap_text "Активности"; sleep 2; shot 15-history-item
+tap_text "Готово"; tap_text "Статистика"; sleep 2; shot 15-stats-after; scroll; shot 15b-stats-after2; tap_text "История"; sleep 1; shot 16-history-item
 adb logcat -d > logcat-full.txt
 grep -E "FATAL|AndroidRuntime: |ReactNativeJS|Cannot find|UnsatisfiedLink|NoClassDef|NoSuchMethod" logcat-full.txt | grep -v -E "START com.android|Calling main entry|VM exiting|Using default boot|Leaving lock" | head -200 > crash.txt || true
 adb shell pidof $PKG > pid.txt || echo none > pid.txt

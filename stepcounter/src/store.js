@@ -14,7 +14,7 @@ export const saveActive = (s) => write(K.active, s);
 export const clearActive = () => AsyncStorage.removeItem(K.active).catch(() => {});
 export const loadHistory = () => read(K.history, []);
 export const saveHistory = (h) => write(K.history, h);
-export const loadProfile = () => read(K.profile, { weight: 70, height: 170 });
+export const loadProfile = () => read(K.profile, { weight: 70, height: 170, goalKm: 3, goalMin: 30 });
 export const saveProfile = (p) => write(K.profile, p);
 export const loadPills = () => read(K.pills, []);
 export const savePills = (p) => write(K.pills, p);

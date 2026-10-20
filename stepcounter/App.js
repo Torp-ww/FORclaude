@@ -14,6 +14,9 @@ import * as HR from './src/hr';
 import MapView, { RouteThumb } from './src/MapView';
 import { C } from './src/theme';
 import { Icon, Card, Metric, Button, RoundButton } from './src/ui';
+import Stats from './src/Stats';
+import { Ring } from './src/charts';
+import { DEFAULT_GOALS } from './src/stats.js';
 import { createSession, pauseSession, resumeSession, finishSession, summarize, kmh, fmtDuration, fmtPace, fmtKm, fmtMeters } from './src/tracker';
 
 const IOS = Platform.OS === 'ios';
@@ -173,6 +176,7 @@ function Walk({ profile, history, reloadHistory }) {
   const [bpm, setBpm] = useState(0);
   const [hrName, setHrName] = useState('');
   const [hrOpen, setHrOpen] = useState(false);
+  const [daySteps, setDaySteps] = useState(null);
   const hrRef = useRef({ sum: 0, count: 0, max: 0, min: 999, samples: [], lastSample: 0 });
   const active = session && !session.endedAt;
   const paused = active && !!session.pausedAt;
@@ -202,6 +206,13 @@ function Walk({ profile, history, reloadHistory }) {
     const id = setInterval(pull, 1000);
     return () => { alive = false; clearInterval(id); };
   }, []);
+
+  // На iOS шаги за весь день берём из системного шагомера, на Android считаются только записанные активности
+  useEffect(() => {
+    if (session || !IOS) return;
+    const t0 = new Date(); t0.setHours(0, 0, 0, 0);
+    iosSteps(t0.getTime(), Date.now()).then(setDaySteps);
+  }, [session, history]);
 
   const start = useCallback(async () => {
     const fg = await Location.requestForegroundPermissionsAsync();
@@ -259,10 +270,18 @@ function Walk({ profile, history, reloadHistory }) {
         <View style={{ flex: 1, paddingHorizontal: 20 }}>
           <Text style={s.h1}>Сегодня</Text>
           <Card>
-            <View style={s.row}>
-              <Metric label="Пройдено" value={fmtKm(today.d)} unit="км" />
-              <Metric label="Шаги" value={today.st.toLocaleString('ru-RU')} />
-              <Metric label="Ккал" value={Math.round(today.k)} />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+              <Ring progress={today.d / 1000 / (profile.goalKm || DEFAULT_GOALS.goalKm)} size={92} color={today.d / 1000 >= (profile.goalKm || DEFAULT_GOALS.goalKm) ? C.green : C.accent}>
+                <Text style={{ color: C.fg, fontSize: 17, fontWeight: '800' }}>{Math.min(999, Math.round((today.d / 1000 / (profile.goalKm || DEFAULT_GOALS.goalKm)) * 100))}%</Text>
+              </Ring>
+              <View style={{ flex: 1, gap: 12 }}>
+                <Text style={s.label}>АКТИВНОСТЬ ЗА ДЕНЬ · ЦЕЛЬ {profile.goalKm || DEFAULT_GOALS.goalKm} КМ</Text>
+                <View style={s.row}>
+                  <Metric label="Пройдено" value={fmtKm(today.d)} unit="км" />
+                  <Metric label="Шаги" value={Math.max(today.st, daySteps || 0).toLocaleString('ru-RU')} />
+                  <Metric label="Ккал" value={Math.round(today.k)} />
+                </View>
+              </View>
             </View>
           </Card>
           <Pressable onPress={() => setHrOpen(true)} style={s.hrChip}>
@@ -308,7 +327,7 @@ function Walk({ profile, history, reloadHistory }) {
   );
 }
 
-function History({ history, reload }) {
+function History({ history, reload, embedded }) {
   const [open, setOpen] = useState(null);
   const remove = async (id) => { await DB.saveHistory(history.filter((h) => h.id !== id)); setOpen(null); reload(); };
   if (open) return (
@@ -322,7 +341,7 @@ function History({ history, reload }) {
   );
   return (
     <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 32 }}>
-      <Text style={s.h1}>Активности</Text>
+      {!embedded && <Text style={s.h1}>Активности</Text>}
       {history.length === 0 && <Text style={s.sub}>Здесь появятся ваши прогулки, с картой маршрута и статистикой.</Text>}
       {history.map((h) => {
         const r = summarize(h);
@@ -394,20 +413,28 @@ function Pills() {
 function Me({ profile, setProfile }) {
   const [w, setW] = useState(String(profile.weight));
   const [h, setH] = useState(String(profile.height));
+  const [gk, setGk] = useState(String(profile.goalKm ?? DEFAULT_GOALS.goalKm));
+  const [gm, setGm] = useState(String(profile.goalMin ?? DEFAULT_GOALS.goalMin));
   const save = async () => {
-    const weight = Number(w.replace(',', '.')), height = Number(h.replace(',', '.'));
+    const num = (v) => Number(String(v).replace(',', '.'));
+    const weight = num(w), height = num(h), goalKm = num(gk), goalMin = num(gm);
     if (!(weight >= 30 && weight <= 250) || !(height >= 100 && height <= 230)) return Alert.alert('Проверьте данные', 'Вес от 30 до 250 кг, рост от 100 до 230 см.');
-    const p = { weight, height }; setProfile(p); await DB.saveProfile(p); Alert.alert('Сохранено', 'Данные применятся к новой прогулке.');
+    if (!(goalKm >= 0.5 && goalKm <= 100) || !(goalMin >= 5 && goalMin <= 600)) return Alert.alert('Проверьте цели', 'Дистанция от 0,5 до 100 км, время от 5 до 600 минут.');
+    const p = { ...profile, weight, height, goalKm, goalMin }; setProfile(p); await DB.saveProfile(p); Alert.alert('Сохранено', 'Данные применятся к новой прогулке.');
   };
   return (
     <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 32 }} keyboardShouldPersistTaps="handled">
       <Text style={s.h1}>Профиль</Text>
-      <Text style={[s.sub, { marginBottom: 16 }]}>Вес нужен для калорий, рост для длины шага.</Text>
+      <Text style={[s.sub, { marginBottom: 16 }]}>Вес нужен для калорий, рост для длины шага, цели для статистики.</Text>
       <Card style={{ gap: 8 }}>
         <Text style={s.label}>ВЕС, КГ</Text>
         <TextInput style={s.input} value={w} onChangeText={setW} keyboardType="decimal-pad" />
         <Text style={s.label}>РОСТ, СМ</Text>
         <TextInput style={s.input} value={h} onChangeText={setH} keyboardType="decimal-pad" />
+        <Text style={s.label}>ЦЕЛЬ НА ДЕНЬ: КИЛОМЕТРЫ</Text>
+        <TextInput style={s.input} value={gk} onChangeText={setGk} keyboardType="decimal-pad" />
+        <Text style={s.label}>ЦЕЛЬ НА ДЕНЬ: МИНУТЫ В ДВИЖЕНИИ</Text>
+        <TextInput style={s.input} value={gm} onChangeText={setGm} keyboardType="decimal-pad" />
         <Button text="Сохранить" onPress={save} style={{ marginTop: 6 }} />
       </Card>
     </ScrollView>
@@ -417,18 +444,18 @@ function Me({ profile, setProfile }) {
 function Root() {
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState('walk');
-  const [profile, setProfile] = useState({ weight: 70, height: 170 });
+  const [profile, setProfile] = useState({ weight: 70, height: 170, goalKm: 3, goalMin: 30 });
   const [history, setHistory] = useState([]);
   const [ready, setReady] = useState(false);
   const reloadHistory = useCallback(() => DB.loadHistory().then(setHistory), []);
-  useEffect(() => { Promise.all([DB.loadProfile().then(setProfile), reloadHistory()]).then(() => setReady(true)); }, [reloadHistory]);
-  const tabs = [['walk', 'Запись', 'record'], ['history', 'Активности', 'clock'], ['pills', 'Таблетки', 'pill'], ['me', 'Профиль', 'user']];
+  useEffect(() => { Promise.all([DB.loadProfile().then((p) => setProfile({ goalKm: 3, goalMin: 30, ...p })), reloadHistory()]).then(() => setReady(true)); }, [reloadHistory]);
+  const tabs = [['walk', 'Запись', 'record'], ['stats', 'Статистика', 'chart'], ['pills', 'Таблетки', 'pill'], ['me', 'Профиль', 'user']];
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top }}>
       <StatusBar style="light" />
       <View style={{ flex: 1 }}>
         {ready && tab === 'walk' && <Walk profile={profile} history={history} reloadHistory={reloadHistory} />}
-        {ready && tab === 'history' && <History history={history} reload={reloadHistory} />}
+        {ready && tab === 'stats' && <Stats history={history} profile={profile} historyView={<History history={history} reload={reloadHistory} embedded />} />}
         {ready && tab === 'pills' && <Pills />}
         {ready && tab === 'me' && <Me profile={profile} setProfile={setProfile} />}
       </View>
