@@ -21,6 +21,7 @@ assert.equal(H.sleepAdvice(8, 30).level, 'ok'); assert.equal(H.sleepAdvice(5, 30
 assert.deepEqual(H.bedtimes('07:00'), ['21:45', '23:15', '00:45']);
 const v = H.vitality({ sleepH: 8, mood: 5, activeMin: 30, goalMin: 30, restHr: 55, age: 30 });
 assert.equal(v.value, 100); assert.equal(H.vitality({}), null);
+assert.equal(H.vitality({ activeMin: 0, goalMin: 30 }), null);
 assert.ok(H.vitality({ sleepH: 4 }).value < 50);
 assert.equal(H.liveTip({ mins: 30, bpm: 180, age: 30 }).level, 'high');
 assert.ok(H.liveTip({ mins: 30, bpm: 100, age: 30 }).text.includes('наушниках'));

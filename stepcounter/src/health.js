@@ -117,7 +117,8 @@ export function vitality({ sleepH, mood, activeMin, goalMin, restHr, age }) {
   if (mood != null) parts.push(['Настроение', Math.round(((mood - 1) / 4) * 100)]);
   if (activeMin != null) parts.push(['Активность', Math.round(Math.min(1, activeMin / (goalMin || 30)) * 100)]);
   if (restHr != null) parts.push(['Пульс покоя', Math.round(Math.max(0, Math.min(1, (95 - restHr) / 40)) * 100)]);
-  if (!parts.length) return null;
+  // одной активности мало: без сна, настроения или пульса показатель ничего не говорит о силах
+  if (!parts.some((p) => p[0] !== 'Активность')) return null;
   return { value: Math.round(parts.reduce((a, p) => a + p[1], 0) / parts.length), parts };
 }
 export const vitalityLabel = (v) => (v >= 75 ? 'Много сил' : v >= 50 ? 'Нормально' : v >= 30 ? 'Силы на исходе' : 'Нужен отдых');
