@@ -45,13 +45,14 @@ anr() {
 }
 SIZE=$(adb shell wm size | grep -oE '[0-9]+x[0-9]+' | tail -1)
 W=${SIZE%x*}; H=${SIZE#*x}
+scrollup() { adb shell input swipe $((W/2)) $((H*25/100)) $((W/2)) $((H*85/100)) 300; sleep 1; }
 scroll() { adb shell input swipe $((W/2)) $((H*70/100)) $((W/2)) $((H*25/100)) 400; sleep 1; }
 
 anr
 shot 01-idle
 tap_text "Подключить датчик пульса"; sleep 3; shot 01b-hr-modal
 adb shell input keyevent 4; sleep 2
-tap_text "Статистика"; sleep 2; shot 02-stats-week; scroll; shot 02b-stats-week2; scroll; shot 02c-stats-week3; scroll; shot 02d-stats-week4; scroll; shot 02e-stats-week5; tap_text "Месяц"; sleep 1; shot 02f-stats-month; tap_text "История"; sleep 1; shot 02g-history; tap_text "Награды"; sleep 1; shot 02h-awards; scroll; shot 02i-awards2
+tap_text "Статистика"; sleep 2; shot 02-stats-week; scroll; shot 02b-stats-week2; scroll; shot 02c-stats-week3; scroll; shot 02d-stats-week4; scroll; shot 02e-stats-week5; scrollup; scrollup; scrollup; scrollup; scrollup; scrollup; tap_text "Месяц"; sleep 1; shot 02f-stats-month; tap_text "История"; sleep 1; shot 02g-history; tap_text "Награды"; sleep 1; shot 02h-awards; scroll; shot 02i-awards2
 tap_text "Здоровье"; sleep 2; shot 03a-health; tap_text "Счётчик отжиманий"; sleep 1; shot 03p-pushups; tap_text "СТАРТ"; sleep 7; shot 03q-pushups-running; adb shell input keyevent 4; sleep 1; scroll; shot 03b-health2; scroll; shot 03c-health3; scroll; shot 03d-health4; scroll; shot 03e-health5; tap_text "Напоминания"; sleep 1; shot 03-pills; tap_text "Тренировки"; sleep 1; shot 03f-workouts
 tap_text "Профиль"; shot 04-profile; scroll; shot 04b-profile2; scroll; shot 04c-profile3; tap_text "Как использовать"; scroll; shot 04d-watch
 tap_text "Запись"
