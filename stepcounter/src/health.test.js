@@ -1,0 +1,34 @@
+import assert from 'node:assert/strict';
+import * as H from './health.js';
+
+assert.equal(Math.round(H.bmi(70, 175) * 10) / 10, 22.9);
+assert.equal(H.bmiLabel(22.9), 'Норма');
+assert.deepEqual(H.healthyRange(175), [56.7, 76.3]);
+const p = { weight: 80, height: 180, age: 30, sex: 'm' };
+assert.equal(H.bmr(p), 1780);
+const lose = H.weightPlan(p, 74);
+assert.equal(lose.dir, 'lose'); assert.equal(lose.weeks, 12); assert.equal(lose.calories, H.dailyCalories(p) - 500);
+const f = H.weightPlan({ weight: 50, height: 160, age: 30, sex: 'f' }, 45);
+assert.ok(f.calories >= 1200 && f.floored);
+assert.equal(H.weightPlan(p, 84).dir, 'gain');
+assert.equal(H.weightPlan(p, 80.2).dir, 'keep');
+assert.equal(H.maxHr(30), 190);
+assert.equal(H.hrZone(80, 30), 'rest'); assert.equal(H.hrZone(120, 30), 'walk'); assert.equal(H.hrZone(160, 30), 'sport');
+assert.equal(H.restAdvice(120, 30), null); assert.equal(H.restAdvice(165, 30).level, 'mid'); assert.equal(H.restAdvice(180, 30).level, 'high');
+const bd = H.hrBreakdown({ hr: { samples: [[0, 100], [10, 120], [20, 165], [30, 165]] } }, 30);
+assert.equal(bd.walk, 20); assert.equal(bd.sport, 10); assert.equal(bd.rest, 0);
+assert.equal(H.sleepAdvice(8, 30).level, 'ok'); assert.equal(H.sleepAdvice(5, 30).level, 'bad'); assert.equal(H.sleepAdvice(6.5, 30).level, 'warn');
+assert.deepEqual(H.bedtimes('07:00'), ['21:45', '23:15', '00:45']);
+const v = H.vitality({ sleepH: 8, mood: 5, activeMin: 30, goalMin: 30, restHr: 55, age: 30 });
+assert.equal(v.value, 100); assert.equal(H.vitality({}), null);
+assert.ok(H.vitality({ sleepH: 4 }).value < 50);
+assert.equal(H.liveTip({ mins: 30, bpm: 180, age: 30 }).level, 'high');
+assert.ok(H.liveTip({ mins: 30, bpm: 100, age: 30 }).text.includes('наушниках'));
+assert.equal(H.liveTip({ mins: 0, bpm: 0, age: 30 }), null);
+// интенсивность: отрезки по 1 с на ~1.2 м/с (4.3 км/ч) -> mid
+const pts = Array.from({ length: 61 }, (_, i) => ({ lat: 56 + i * 0.0000108, lon: 60, t: i * 1000 }));
+const it = H.intensity({ points: pts }); assert.ok(it.mid > 0.9);
+assert.equal(H.intensity({ points: pts.slice(0, 5) }), null);
+assert.ok(H.coach({ daysSince: null, profile: p }).length >= 1);
+assert.ok(H.coach({ daysSince: 5, streak: 0, profile: p })[0].includes('5'));
+console.log('health: всё прошло');

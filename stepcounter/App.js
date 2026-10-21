@@ -8,15 +8,18 @@ import { Pedometer } from 'expo-sensors';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Svg, { Polyline } from 'react-native-svg';
 import { LOCATION_TASK } from './src/task';
-import * as P from './src/pills';
 import * as DB from './src/store';
 import * as HR from './src/hr';
 import MapView, { RouteThumb } from './src/MapView';
 import { C } from './src/theme';
 import { Icon, Card, Metric, Button, RoundButton } from './src/ui';
 import Stats from './src/Stats';
+import Health from './src/Health';
+import Reminders from './src/Reminders';
+import * as HL from './src/health.js';
 import { Ring } from './src/charts';
 import { DEFAULT_GOALS } from './src/stats.js';
+import * as S from './src/stats.js';
 import { createSession, pauseSession, resumeSession, finishSession, summarize, kmh, fmtDuration, fmtPace, fmtKm, fmtMeters } from './src/tracker';
 
 const IOS = Platform.OS === 'ios';
@@ -67,11 +70,68 @@ function HrSpark({ samples }) {
 }
 
 // Экран с итогами активности: карта, расстояние в км и метрах, время, темп, скорости, калории, пульс.
-function ActivityView({ session, steps, bpm, live }) {
+function IntensityCard({ session, profile }) {
+  const it = HL.intensity(session);
+  if (!it) return null;
+  const parts = [['Лёгкая', it.low, C.dim], ['Умеренная', it.mid, C.green], ['Интенсивная', it.high, C.accent]];
+  return (
+    <Card>
+      <Text style={[s.label, { marginBottom: 10 }]}>АКТИВНОСТЬ ВО ВРЕМЯ ЗАНЯТИЯ</Text>
+      <View style={{ flexDirection: 'row', height: 14, borderRadius: 7, overflow: 'hidden', backgroundColor: C.line }}>
+        {parts.map(([n, v, c]) => (v > 0 ? <View key={n} style={{ flex: v, backgroundColor: c }} /> : null))}
+      </View>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
+        {parts.map(([n, v, c]) => (
+          <View key={n} style={{ alignItems: 'flex-start' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}><View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: c }} /><Text style={s.sub}>{n}</Text></View>
+            <Text style={{ color: C.fg, fontSize: 16, fontWeight: '800' }}>{Math.round(v * 100)}%</Text>
+          </View>
+        ))}
+      </View>
+      <Text style={[s.sub, { marginTop: 8 }]}>По скорости: до 4 км/ч, 4-6,4 км/ч и быстрее.</Text>
+    </Card>
+  );
+}
+function HrZonesCard({ session, profile }) {
+  const b = HL.hrBreakdown(session, profile.age);
+  if (!b) return null;
+  const rows = [['rest', C.dim], ['walk', C.green], ['sport', C.accent]];
+  return (
+    <Card>
+      <Text style={[s.label, { marginBottom: 10 }]}>ПУЛЬС: ПОКОЙ, ХОДЬБА, СПОРТ</Text>
+      {rows.map(([k, c]) => (
+        <View key={k} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+          <Text style={{ color: C.fg, width: 70, fontSize: 14 }}>{HL.ZONES[k]}</Text>
+          <View style={{ flex: 1, height: 10, borderRadius: 5, backgroundColor: C.line }}><View style={{ width: `${Math.round((b[k] / b.total) * 100)}%`, height: 10, borderRadius: 5, backgroundColor: c }} /></View>
+          <Text style={[s.sub, { width: 52, textAlign: 'right' }]}>{fmtDuration(b[k] * 1000)}</Text>
+        </View>
+      ))}
+    </Card>
+  );
+}
+function TipCard({ tip }) {
+  if (!tip) return null;
+  const col = tip.level === 'high' ? C.stop : tip.level === 'mid' ? C.warn : C.accent;
+  return (
+    <View style={{ backgroundColor: C.surface, borderRadius: 20, padding: 16, borderLeftWidth: 4, borderLeftColor: col }}>
+      <Text style={[s.label, { color: col, marginBottom: 6 }]}>{tip.level === 'info' ? 'СОВЕТ ТРЕНЕРА' : 'ВНИМАНИЕ'}</Text>
+      <Text style={{ color: C.fg, fontSize: 15, lineHeight: 22 }}>{tip.text}</Text>
+    </View>
+  );
+}
+
+function ActivityView({ session, steps, bpm, live, profile }) {
   const r = summarize(session, Date.now(), steps);
+  const pulseOn = DB.feat(profile, 'pulse');
+  let tip = null;
+  if (live && !session.pausedAt) {
+    tip = HL.liveTip({ mins: r.totalMs / 60000, bpm: pulseOn ? bpm : 0, age: profile.age, kmh: kmh(r.speed), headphones: DB.feat(profile, 'headphones') });
+    if (tip && tip.level === 'info' && !DB.feat(profile, 'liveTips') && !(tip.text.includes('наушниках') && DB.feat(profile, 'headphones'))) tip = null;
+  }
   const points = session.points;
   return (
     <View style={{ gap: 12 }}>
+      <TipCard tip={tip} />
       <MapView points={points} height={live ? 240 : 280} />
       <Card style={{ paddingVertical: 20 }}>
         <Text style={s.label}>РАССТОЯНИЕ</Text>
@@ -121,6 +181,8 @@ function ActivityView({ session, steps, bpm, live }) {
           <Metric label="Стоял" value={fmtDuration(r.idleMs)} />
         </View>
       </Card>
+      <IntensityCard session={session} profile={profile} />
+      {!live && pulseOn && <HrZonesCard session={session} profile={profile} />}
       {!IOS && <Text style={[s.sub, { textAlign: 'center' }]}>На Android шаги считаются по расстоянию и росту, это приблизительно.</Text>}
     </View>
   );
@@ -177,13 +239,22 @@ function Walk({ profile, history, reloadHistory }) {
   const [hrName, setHrName] = useState('');
   const [hrOpen, setHrOpen] = useState(false);
   const [daySteps, setDaySteps] = useState(null);
+  const restRef = useRef({ sum: 0, n: 0 });
   const hrRef = useRef({ sum: 0, count: 0, max: 0, min: 999, samples: [], lastSample: 0 });
   const active = session && !session.endedAt;
   const paused = active && !!session.pausedAt;
 
   const onBpm = useCallback((v) => {
     setBpm(v);
-    if (!hrRef.current.recording) return;
+    if (!hrRef.current.recording) {
+      // вне записи копим пульс покоя: средний за серию измерений сохраняем за сегодня
+      const q = restRef.current; q.sum += v; q.n += 1;
+      if (q.n >= 30) {
+        const avg = Math.round(q.sum / q.n); q.sum = 0; q.n = 0;
+        DB.loadRestHr().then((m) => { const k = S.dayKey(Date.now()); const o = m[k]; m[k] = { avg: o ? Math.round((o.avg + avg) / 2) : avg, n: (o ? o.n : 0) + 1 }; return DB.saveRestHr(m); });
+      }
+      return;
+    }
     const h = hrRef.current;
     h.sum += v; h.count += 1; h.max = Math.max(h.max, v); h.min = Math.min(h.min, v);
     const t = Date.now();
@@ -307,7 +378,7 @@ function Walk({ profile, history, reloadHistory }) {
               <Text style={s.status}>{!active ? dayName(session.startedAt).toUpperCase() : paused ? 'ПАУЗА' : 'ЗАПИСЬ'}</Text>
               {!active && <Text style={[s.sub, { marginLeft: 'auto' }]}>{fmtDate(session.startedAt)}</Text>}
             </View>
-            <ActivityView session={session} steps={steps} bpm={bpm} live={active} />
+            <ActivityView session={session} steps={steps} bpm={bpm} live={active} profile={profile} />
             {!active && <Button text="Готово" onPress={reset} style={{ marginTop: 16 }} />}
           </ScrollView>
           {active && (
@@ -327,7 +398,7 @@ function Walk({ profile, history, reloadHistory }) {
   );
 }
 
-function History({ history, reload, embedded }) {
+function History({ history, reload, embedded, profile }) {
   const [open, setOpen] = useState(null);
   const remove = async (id) => { await DB.saveHistory(history.filter((h) => h.id !== id)); setOpen(null); reload(); };
   if (open) return (
@@ -335,7 +406,7 @@ function History({ history, reload, embedded }) {
       <Pressable onPress={() => setOpen(null)} style={{ marginBottom: 12 }}><Text style={s.back}>‹ Все активности</Text></Pressable>
       <Text style={s.h2}>{dayName(open.startedAt)}</Text>
       <Text style={[s.sub, { marginBottom: 14 }]}>{fmtDate(open.startedAt)}</Text>
-      <ActivityView session={open} steps={null} live={false} />
+      <ActivityView session={open} steps={null} live={false} profile={profile} />
       <Pressable onPress={() => remove(open.id)} style={{ alignItems: 'center', padding: 18 }}><Text style={{ color: C.stop, fontSize: 16, fontWeight: '600' }}>Удалить запись</Text></Pressable>
     </ScrollView>
   );
@@ -364,79 +435,81 @@ function History({ history, reload, embedded }) {
   );
 }
 
-function Pills() {
-  const [list, setList] = useState([]);
-  const [name, setName] = useState('');
-  const [time, setTime] = useState('');
-  useEffect(() => { DB.loadPills().then(setList); }, []);
-  const commit = async (n) => { setList(n); await DB.savePills(n); };
-  const add = async () => {
-    const t = P.normalizeTime(time);
-    if (!name.trim()) return Alert.alert('Введите название таблетки');
-    if (!t) return Alert.alert('Введите время', 'Например 08:30');
-    if (!(await P.askPermission())) return Alert.alert('Уведомления выключены', 'Разрешите уведомления в настройках телефона.');
-    const nid = await P.schedulePill(name.trim(), t);
-    await commit([...list, { id: String(Date.now()), name: name.trim(), time: t, on: true, nid }].sort((a, b) => a.time.localeCompare(b.time)));
-    setName(''); setTime('');
-  };
-  const toggle = async (p) => {
-    let nid = null;
-    if (p.on) await P.cancelPill(p.nid); else nid = await P.schedulePill(p.name, p.time);
-    await commit(list.map((x) => (x.id === p.id ? { ...x, on: !p.on, nid } : x)));
-  };
-  const remove = async (p) => { await P.cancelPill(p.nid); await commit(list.filter((x) => x.id !== p.id)); };
-  return (
-    <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 32 }} keyboardShouldPersistTaps="handled">
-      <Text style={s.h1}>Таблетки</Text>
-      {list.map((p) => (
-        <View key={p.id} style={s.item}>
-          <View style={{ flex: 1 }}>
-            <Text style={[s.pillTime, !p.on && { color: C.dim }]}>{p.time}</Text>
-            <Text style={s.sub}>{p.name}</Text>
-          </View>
-          <Switch value={p.on} onValueChange={() => toggle(p)} trackColor={{ true: C.accent, false: C.line }} thumbColor="#fff" />
-          <Pressable onPress={() => remove(p)} hitSlop={10} style={{ paddingLeft: 16 }}><Icon name="x" size={20} color={C.dim} /></Pressable>
-        </View>
-      ))}
-      {list.length === 0 && <Text style={[s.sub, { marginBottom: 16 }]}>Напоминаний пока нет. Добавьте первое, телефон будет напоминать каждый день.</Text>}
-      <Card style={{ gap: 8 }}>
-        <Text style={s.label}>НАЗВАНИЕ</Text>
-        <TextInput style={s.input} value={name} onChangeText={setName} placeholder="Например, Витамин D" placeholderTextColor={C.dim} />
-        <Text style={s.label}>ВРЕМЯ</Text>
-        <TextInput style={s.input} value={time} onChangeText={setTime} placeholder="08:30" placeholderTextColor={C.dim} keyboardType="numbers-and-punctuation" maxLength={5} />
-        <Button text="Добавить напоминание" onPress={add} style={{ marginTop: 6 }} />
-      </Card>
-    </ScrollView>
-  );
-}
-
 function Me({ profile, setProfile }) {
   const [w, setW] = useState(String(profile.weight));
   const [h, setH] = useState(String(profile.height));
+  const [age, setAge] = useState(String(profile.age ?? 30));
   const [gk, setGk] = useState(String(profile.goalKm ?? DEFAULT_GOALS.goalKm));
   const [gm, setGm] = useState(String(profile.goalMin ?? DEFAULT_GOALS.goalMin));
+  const [sex, setSex] = useState(profile.sex || 'm');
+  const [watch, setWatch] = useState(false);
   const save = async () => {
     const num = (v) => Number(String(v).replace(',', '.'));
-    const weight = num(w), height = num(h), goalKm = num(gk), goalMin = num(gm);
+    const weight = num(w), height = num(h), goalKm = num(gk), goalMin = num(gm), a = num(age);
     if (!(weight >= 30 && weight <= 250) || !(height >= 100 && height <= 230)) return Alert.alert('Проверьте данные', 'Вес от 30 до 250 кг, рост от 100 до 230 см.');
+    if (!(a >= 5 && a <= 100)) return Alert.alert('Проверьте возраст', 'Возраст от 5 до 100 лет.');
     if (!(goalKm >= 0.5 && goalKm <= 100) || !(goalMin >= 5 && goalMin <= 600)) return Alert.alert('Проверьте цели', 'Дистанция от 0,5 до 100 км, время от 5 до 600 минут.');
-    const p = { ...profile, weight, height, goalKm, goalMin }; setProfile(p); await DB.saveProfile(p); Alert.alert('Сохранено', 'Данные применятся к новой прогулке.');
+    const p = { ...profile, weight, height, goalKm, goalMin, age: a, sex }; setProfile(p);
+    await DB.saveProfile(p); Alert.alert('Сохранено', 'Данные применятся к новой прогулке.');
+  };
+  const setFeature = async (k, v) => {
+    const p = { ...profile, features: { ...(profile.features || {}), [k]: v } };
+    setProfile(p); await DB.saveProfile(p);
   };
   return (
-    <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 32 }} keyboardShouldPersistTaps="handled">
+    <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 32, gap: 12 }} keyboardShouldPersistTaps="handled">
       <Text style={s.h1}>Профиль</Text>
-      <Text style={[s.sub, { marginBottom: 16 }]}>Вес нужен для калорий, рост для длины шага, цели для статистики.</Text>
+      <Text style={s.sub}>Вес нужен для калорий, рост для длины шага, возраст для зон пульса, цели для статистики.</Text>
       <Card style={{ gap: 8 }}>
         <Text style={s.label}>ВЕС, КГ</Text>
         <TextInput style={s.input} value={w} onChangeText={setW} keyboardType="decimal-pad" />
         <Text style={s.label}>РОСТ, СМ</Text>
         <TextInput style={s.input} value={h} onChangeText={setH} keyboardType="decimal-pad" />
+        <Text style={s.label}>ВОЗРАСТ</Text>
+        <TextInput style={s.input} value={age} onChangeText={setAge} keyboardType="number-pad" maxLength={3} />
+        <Text style={s.label}>ПОЛ (ДЛЯ РАСЧЁТА КАЛОРИЙ)</Text>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          {[['m', 'Мужской'], ['f', 'Женский']].map(([k, l]) => (
+            <Pressable key={k} onPress={() => setSex(k)} style={[s.pick, sex === k && { backgroundColor: C.accent }]}><Text style={{ color: sex === k ? '#fff' : C.dim, fontWeight: '700' }}>{l}</Text></Pressable>
+          ))}
+        </View>
         <Text style={s.label}>ЦЕЛЬ НА ДЕНЬ: КИЛОМЕТРЫ</Text>
         <TextInput style={s.input} value={gk} onChangeText={setGk} keyboardType="decimal-pad" />
         <Text style={s.label}>ЦЕЛЬ НА ДЕНЬ: МИНУТЫ В ДВИЖЕНИИ</Text>
         <TextInput style={s.input} value={gm} onChangeText={setGm} keyboardType="decimal-pad" />
         <Button text="Сохранить" onPress={save} style={{ marginTop: 6 }} />
       </Card>
+
+      <Text style={[s.h2, { marginTop: 12 }]}>Функции</Text>
+      <Text style={s.sub}>Отключите то, что вам не нужно: вкладки и подсказки исчезнут.</Text>
+      <Card style={{ paddingVertical: 4 }}>
+        {DB.FEATURES.map(([k, l], i) => (
+          <View key={k} style={[{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12 }, i > 0 && { borderTopWidth: 1, borderTopColor: C.line }]}>
+            <Text style={{ color: C.fg, fontSize: 15, flex: 1, paddingRight: 12 }}>{l}</Text>
+            <Switch value={DB.feat(profile, k)} onValueChange={(v) => setFeature(k, v)} trackColor={{ true: C.accent, false: C.line }} thumbColor="#fff" />
+          </View>
+        ))}
+      </Card>
+
+      <Pressable onPress={() => setWatch(!watch)} style={[s.item, { marginBottom: 0, marginTop: 12 }]}>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: C.fg, fontSize: 16, fontWeight: '700' }}>Как использовать с умными часами</Text>
+          <Text style={s.sub}>Пульс с часов и уведомления на запястье</Text>
+        </View>
+        <Icon name="chevron" size={18} color={C.dim} style={{ transform: [{ rotate: watch ? '90deg' : '0deg' }] }} />
+      </Pressable>
+      {watch && (
+        <Card style={{ gap: 8 }}>
+          <Text style={s.label}>ВАЖНО</Text>
+          <Text style={s.tip}>Отдельной версии приложения для часов пока нет: приложение работает на телефоне, а часы можно подключить двумя способами.</Text>
+          <Text style={[s.label, { marginTop: 8 }]}>1. ПУЛЬС С ЧАСОВ</Text>
+          <Text style={s.tip}>На часах включите режим «Передача пульса» (Heart rate broadcast): он есть в Garmin, Amazfit и Zepp, Polar, Suunto, Huawei и многих браслетах Xiaomi. Затем на экране «Запись» нажмите «Подключить датчик пульса» и выберите часы в списке. Часы Apple Watch и Wear OS напрямую не определяются: для них нужны сторонние приложения, которые передают пульс по Bluetooth.</Text>
+          <Text style={[s.label, { marginTop: 8 }]}>2. УВЕДОМЛЕНИЯ НА ЧАСАХ</Text>
+          <Text style={s.tip}>Напоминания о таблетках приходят как обычные уведомления телефона. Если часы связаны с телефоном в приложении производителя (Mi Fitness, Zepp, Garmin Connect, Samsung Wearable и т. д.), включите там пересылку уведомлений для приложения «Шагомер».</Text>
+          <Text style={[s.label, { marginTop: 8 }]}>ЕСЛИ НЕ ПОЛУЧАЕТСЯ</Text>
+          <Text style={s.tip}>Закройте приложение производителя часов, которое могло занять Bluetooth-подключение, и повторите поиск. Разрешите «Шагомеру» доступ к Bluetooth и геолокации «Всегда».</Text>
+        </Card>
+      )}
     </ScrollView>
   );
 }
@@ -449,14 +522,17 @@ function Root() {
   const [ready, setReady] = useState(false);
   const reloadHistory = useCallback(() => DB.loadHistory().then(setHistory), []);
   useEffect(() => { Promise.all([DB.loadProfile().then((p) => setProfile({ goalKm: 3, goalMin: 30, ...p })), reloadHistory()]).then(() => setReady(true)); }, [reloadHistory]);
-  const tabs = [['walk', 'Запись', 'record'], ['stats', 'Статистика', 'chart'], ['pills', 'Таблетки', 'pill'], ['me', 'Профиль', 'user']];
+  const f = (k) => DB.feat(profile, k);
+  const tabs = [['walk', 'Запись', 'record'], f('stats') && ['stats', 'Статистика', 'chart'], f('health') && ['health', 'Здоровье', 'heart'], f('pills') && ['pills', 'Напоминания', 'pill'], ['me', 'Профиль', 'user']].filter(Boolean);
+  useEffect(() => { if (!tabs.some((t) => t[0] === tab)) setTab('me'); }, [profile.features]);
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top }}>
       <StatusBar style="light" />
       <View style={{ flex: 1 }}>
         {ready && tab === 'walk' && <Walk profile={profile} history={history} reloadHistory={reloadHistory} />}
-        {ready && tab === 'stats' && <Stats history={history} profile={profile} historyView={<History history={history} reload={reloadHistory} embedded />} />}
-        {ready && tab === 'pills' && <Pills />}
+        {ready && tab === 'stats' && <Stats history={history} profile={profile} historyView={<History history={history} reload={reloadHistory} embedded profile={profile} />} />}
+        {ready && tab === 'health' && <Health history={history} profile={profile} />}
+        {ready && tab === 'pills' && <Reminders />}
         {ready && tab === 'me' && <Me profile={profile} setProfile={setProfile} />}
       </View>
       <View style={[s.tabs, { paddingBottom: Math.max(insets.bottom, 8) }]}>
@@ -500,6 +576,8 @@ const s = StyleSheet.create({
   item: { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: C.surface, borderRadius: 20, padding: 14, marginBottom: 12 },
   pillTime: { color: C.fg, fontSize: 30, fontWeight: '800', fontVariant: ['tabular-nums'] },
   input: { backgroundColor: C.bg, color: C.fg, borderRadius: 14, borderWidth: 1, borderColor: C.line, padding: 14, fontSize: 18 },
+  pick: { flex: 1, paddingVertical: 12, borderRadius: 12, backgroundColor: C.surface2, alignItems: 'center' },
+  tip: { color: C.fg, fontSize: 14, lineHeight: 21 },
   back: { color: C.accent, fontSize: 17, fontWeight: '600' },
   device: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.surface2, borderRadius: 14, padding: 14, marginBottom: 8 },
 });

@@ -52,8 +52,8 @@ shot 01-idle
 tap_text "Подключить датчик пульса"; sleep 3; shot 01b-hr-modal
 adb shell input keyevent 4; sleep 2
 tap_text "Статистика"; sleep 2; shot 02-stats-week; scroll; shot 02b-stats-week2; scroll; shot 02c-stats-week3; scroll; shot 02d-stats-week4; scroll; shot 02e-stats-week5; tap_text "Месяц"; sleep 1; shot 02f-stats-month; tap_text "История"; sleep 1; shot 02g-history
-tap_text "Таблетки"; shot 03-pills
-tap_text "Профиль"; shot 04-profile
+tap_text "Здоровье"; sleep 2; shot 03a-health; scroll; shot 03b-health2; scroll; shot 03c-health3; scroll; shot 03d-health4; scroll; shot 03e-health5; tap_text "Напоминания"; sleep 1; shot 03-pills; tap_text "Тренировки"; sleep 1; shot 03f-workouts
+tap_text "Профиль"; shot 04-profile; scroll; shot 04b-profile2; scroll; shot 04c-profile3; tap_text "Как использовать"; scroll; shot 04d-watch
 tap_text "Запись"
 shot 05-idle-again
 anr
