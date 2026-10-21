@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import { evaluate, shareSummary } from './achievements.js';
+const at = (y, m, d, h = 12) => new Date(y, m - 1, d, h).getTime();
+const act = (t, distance, min, extra = {}) => ({ startedAt: t, endedAt: t + min * 60000, points: [], distance, movingMs: min * 60000, maxSpeed: 2.5, minSpeed: 1, calories: distance / 10, weight: 70, stride: 0.7, pausedMs: 0, pausedAt: null, finalSteps: null, ...extra });
+const none = evaluate({});
+assert.equal(none.length, 20); assert.ok(none.every((a) => !a.done));
+const h = [1, 2, 3].map((d) => act(at(2026, 10, 10 + d, d === 1 ? 6 : 12), 6000, 60));
+const r = evaluate({ history: h, pushups: [{ correct: 12 }, { correct: 5 }], moods: {}, sleep: { a: { h: 8 } } });
+const done = (id) => r.find((a) => a.id === id).done;
+assert.ok(done('first') && done('km10') && done('one5') && done('streak3') && done('lark') && done('speed') && done('push10'));
+assert.ok(!done('km100') && !done('streak7') && !done('owl') && !done('push100') && !done('mood7'));
+assert.ok(shareSummary(r).includes('Первый шаг'));
+console.log('achievements: всё прошло');

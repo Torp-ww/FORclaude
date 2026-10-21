@@ -6,7 +6,7 @@
     "start": "expo start --dev-client",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "test": "node --no-warnings src/tracker.test.js && node --no-warnings src/stats.test.js && node --no-warnings src/health.test.js"
+    "test": "node --no-warnings src/tracker.test.js && node --no-warnings src/stats.test.js && node --no-warnings src/health.test.js && node --no-warnings src/pushups.test.js && node --no-warnings src/achievements.test.js"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.1.2",
@@ -16,6 +16,7 @@
     "expo-dev-client": "~5.2.4",
     "expo-file-system": "~18.1.11",
     "expo-font": "~13.3.2",
+    "expo-keep-awake": "~14.1.4",
     "expo-location": "~18.1.6",
     "expo-notifications": "~0.31.4",
     "expo-sensors": "~14.1.4",

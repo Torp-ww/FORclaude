@@ -6,6 +6,7 @@ import { BarChart, Ring } from './charts';
 import * as DB from './store';
 import * as H from './health.js';
 import * as S from './stats.js';
+import Pushups from './Pushups';
 
 const key = (t = Date.now()) => S.dayKey(t);
 const num = (v) => Number(String(v).replace(',', '.'));
@@ -19,6 +20,7 @@ export default function Health({ history, profile }) {
   const [restIn, setRestIn] = useState('');
   const [wake, setWake] = useState('07:00');
   const [target, setTarget] = useState('');
+  const [pushOpen, setPushOpen] = useState(false);
   useEffect(() => { Promise.all([DB.loadMoods(), DB.loadSleep(), DB.loadRestHr()]).then(([m, s, r]) => { setMoods(m); setSleep(s); setRest(r); }); }, []);
 
   const now = Date.now(), today = key(now);
@@ -73,6 +75,18 @@ export default function Health({ history, profile }) {
           <Text style={[st.sub, { marginTop: 8 }]}>Советы строятся по правилам из ваших данных, это не медицинские рекомендации.</Text>
         </Card>
       )}
+
+      {on('pushups') && (
+        <Pressable onPress={() => setPushOpen(true)} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: C.surface, borderRadius: 20, padding: 16 }}>
+          <Text style={{ fontSize: 30 }}>💪</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: C.fg, fontSize: 17, fontWeight: '800' }}>Счётчик отжиманий</Text>
+            <Text style={st.sub}>Считает правильные повторения по датчику движения</Text>
+          </View>
+          <Icon name="chevron" size={18} color={C.dim} />
+        </Pressable>
+      )}
+      <Pushups visible={pushOpen} onClose={() => setPushOpen(false)} />
 
       <Card style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
         <Ring progress={vit ? vit.value / 100 : 0} size={92} color={vit && vit.value < 30 ? C.stop : vit && vit.value < 50 ? C.warn : C.green}>

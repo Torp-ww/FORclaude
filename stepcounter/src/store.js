@@ -34,6 +34,10 @@ export const FEATURES = [
   ['pulse', 'Пульс: зоны и советы отдохнуть'],
   ['liveTips', 'Подсказки во время тренировки'],
   ['headphones', 'Совет про громкость наушников'],
+  ['pushups', 'Счётчик отжиманий'],
+  ['awards', 'Достижения'],
   ['pills', 'Напоминания (таблетки и тренировки)'],
 ];
 export const feat = (profile, key) => !(profile && profile.features && profile.features[key] === false);
+export const loadPushups = () => read('pushups.v1', []);
+export const savePushups = (p) => write('pushups.v1', p);

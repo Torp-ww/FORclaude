@@ -5,6 +5,8 @@ import { Icon, Card, Button } from './ui';
 import { BarChart, Ring, DayDot, LineChart } from './charts';
 import { fmtDuration, fmtKm, kmh, fmtPace } from './tracker.js';
 import * as S from './stats.js';
+import Awards from './Awards';
+import { feat } from './store';
 
 const WD = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 const METRICS = {
@@ -37,7 +39,7 @@ export default function Stats({ history, profile, historyView }) {
   const g = { ...S.DEFAULT_GOALS, ...goals };
 
   const data = useMemo(() => {
-    if (seg === 'history') return null;
+    if (seg === 'history' || seg === 'awards') return null;
     const range = S.periodRange(kind, now, offset);
     const days = S.daySeries(history, range);
     const cur = S.totals(days), prev = S.totals(S.daySeries(history, S.periodRange(kind, now, offset - 1)));
@@ -55,7 +57,7 @@ export default function Stats({ history, profile, historyView }) {
     <View style={{ paddingHorizontal: 20 }}>
       <Text style={st.h1}>Статистика</Text>
       <View style={st.seg}>
-        {[['week', 'Неделя'], ['month', 'Месяц'], ['history', 'История']].map(([k, l]) => (
+        {[['week', 'Неделя'], ['month', 'Месяц'], ['history', 'История'], ...(feat(profile, 'awards') ? [['awards', 'Награды']] : [])].map(([k, l]) => (
           <Pressable key={k} onPress={() => { setSeg(k); setOffset(0); }} style={[st.segItem, seg === k && st.segOn]}>
             <Text style={[st.segText, seg === k && { color: '#fff' }]}>{l}</Text>
           </Pressable>
@@ -64,6 +66,7 @@ export default function Stats({ history, profile, historyView }) {
     </View>
   );
   if (seg === 'history') return <View style={{ flex: 1 }}>{header}<View style={{ flex: 1 }}>{historyView}</View></View>;
+  if (seg === 'awards') return <View style={{ flex: 1 }}>{header}<View style={{ flex: 1 }}><Awards history={history} profile={profile} /></View></View>;
 
   const { range, days, cur, prev, goal, streak, rec, fit, report } = data;
   const todayT = S.dayStart(now);
@@ -245,7 +248,7 @@ const st = StyleSheet.create({
   seg: { flexDirection: 'row', backgroundColor: C.surface, borderRadius: 14, padding: 4 },
   segItem: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
   segOn: { backgroundColor: C.accent },
-  segText: { color: C.dim, fontWeight: '700', fontSize: 14 },
+  segText: { color: C.dim, fontWeight: '700', fontSize: 13 },
   nav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 4 },
   navText: { color: C.fg, fontSize: 17, fontWeight: '700' },
   label: { color: C.dim, fontSize: 12, fontWeight: '700', letterSpacing: 0.8 },
